@@ -67,16 +67,16 @@
 }
 .st-flash-yellow{
   background: var(--yellow);
-  animation: st-flash 700ms ease-in-out 3;
+  animation: st-flash 1500ms ease-in-out 3;
 }
 .st-flash-red{
   background: var(--red);
-  animation: st-flash 700ms ease-in-out 3;
+  animation: st-flash 1500ms ease-in-out 3;
 }
 @media (prefers-reduced-motion: reduce){
   .st-flash-yellow,
   .st-flash-red{
-    animation-duration: 700ms;
+    animation-duration: 1500ms;
     animation-iteration-count: 1; /* single soft fade for accessibility */
   }
 }
