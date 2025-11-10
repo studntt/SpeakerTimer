@@ -10,56 +10,153 @@
   <main class="control-wrap">
     <header class="topbar">
       <h1>Speaker Timer</h1>
-      <!-- Top-right toggle for Room/Link panel -->
       <button id="panelToggle"
               class="icon-button"
               aria-label="Toggle room and link panel"
               aria-controls="roomPanel"
               aria-expanded="false"
               type="button">
-        <!-- simple icon glyph; style via CSS -->
         <span aria-hidden="true">⚙️</span>
       </button>
     </header>
 
-    <!-- Room / Link (collapsible) -->
+    <!-- Collapsible Room / Link panel (directly under topbar) -->
     <section id="roomPanel"
              class="card room-card dropdown-panel is-closed"
              aria-labelledby="roomHeading"
              aria-hidden="true">
-      <h2 id="roomHeading" class="visually-hidden">Room</h2>
-      <div class="row" role="group" aria-label="Room controls">
-        <label for="room">Room code</label>
-        <input id="room" aria-label="Room code" />
-        <button id="join" class="button primary">Join</button>
-        <a id="openDisplay" class="button" target="_blank" rel="noopener">Open Display</a>
+      <h2 id="roomHeading" class="visually-hidden">Room &amp; Link</h2>
+
+      <div class="row">
+        <label class="field">
+          <span class="label">Room code</span>
+          <input id="room" class="input" type="text" inputmode="latin" maxlength="8" />
+        </label>
+
+        <button id="join" class="button btn-dark-green" type="button">Join</button>
+        <a id="openDisplay" class="button" href="#" target="_blank" rel="noopener">Open Display</a>
         <button id="copyLink" class="button" type="button">Copy Link</button>
-        <span id="status" class="status-pill">IDLE</span>
+
+        <!-- Status pill (control.js updates text/color) -->
+        <div id="status" class="status-pill">IDLE</div>
       </div>
+
+      <!-- Small hint line under the row -->
       <p class="hint">Anyone with the link can open the display.</p>
     </section>
 
-    <!-- Timer preview (locked to 03:00). Progress track removed. -->
+    <!-- Timer card -->
     <section class="card timer-card" aria-labelledby="timerHeading">
       <h2 id="timerHeading" class="visually-hidden">Timer</h2>
-      <div class="time-big" id="preview" aria-live="polite">03:00</div>
+      <div id="preview" class="time-big">03:00</div>
     </section>
 
-    <!-- Controls (single horizontal row) -->
+    <!-- Controls card -->
     <section class="card controls-card" aria-labelledby="controlsHeading">
       <h2 id="controlsHeading" class="visually-hidden">Controls</h2>
-      <div class="controls" role="group" aria-label="Timer controls">
-        <button id="start" class="button btn-dark-green">Start</button>
-        <button id="pause" class="button btn-yellow">Pause</button>
-        <button id="reset" class="button">Reset</button>
-        <button id="minus30" type="button" class="button btn-red" aria-label="Subtract 30 seconds">−30s</button>
-        <button id="plus30"  type="button" class="button btn-light-green" aria-label="Add 30 seconds">+30s</button>
+
+      <div class="controls">
+        <button id="start"  type="button">Start</button>
+        <button id="pause"  type="button">Pause</button>
+        <button id="reset"  type="button">Reset</button>
+        <button id="minus30" type="button">−30s</button>
+        <button id="plus30"  type="button">+30s</button>
       </div>
-      <!-- New helper note -->
-      <p class="hint" style="margin-top:0.5rem; text-align:center;">When in doubt, press reset.</p>
+
+      <p class="tip-line">When in doubt, press reset.</p>
+      <p class="help-line">
+        Need help? Press <kbd>H</kbd> or
+        <a id="helpLink" href="#" class="help-link">click here</a>.
+      </p>
     </section>
   </main>
 
+  <!-- ===== HELP MODAL (hidden by default) ===== -->
+  <div id="helpBackdrop" class="modal-backdrop" hidden></div>
+
+  <div id="helpModal"
+       class="modal"
+       role="dialog"
+       aria-modal="true"
+       aria-labelledby="helpTitle"
+       hidden>
+    <div class="modal-chrome" tabindex="-1">
+      <header class="modal-header">
+        <h2 id="helpTitle" class="modal-title">Quick User Manual</h2>
+        <button id="helpClose" class="icon-button" aria-label="Close help">✕</button>
+      </header>
+
+      <div class="modal-body">
+        <h3>Purpose</h3>
+        <p><strong>Speaker Timer</strong> is a real-time, synced countdown system for presentations, debates, and events.</p>
+        <ul>
+          <li><strong>Control Page</strong>: manage and adjust the timer.</li>
+          <li><strong>Display Page</strong>: clean synced countdown for audiences or projectors.</li>
+        </ul>
+
+        <h3>Best Practice</h3>
+        <p><strong>Always press Reset first</strong>, then set time, then <strong>Start</strong>. Ensures flashes and alarm trigger correctly.</p>
+
+        <h3>Controls</h3>
+        <table class="doc-table">
+          <thead><tr><th>Button</th><th>Function</th></tr></thead>
+          <tbody>
+            <tr><td>Start / Resume</td><td>Starts or resumes from current time.</td></tr>
+            <tr><td>Pause</td><td>Temporarily halts the countdown.</td></tr>
+            <tr><td>Reset</td><td>Restores to default <strong>3:00</strong>.</td></tr>
+            <tr><td>−30s / +30s</td><td>Adjust remaining time before or during countdown.</td></tr>
+          </tbody>
+        </table>
+        <p class="doc-tip">Tip: Adjust before pressing Start for the cleanest run.</p>
+
+        <h3>Color Phases</h3>
+        <table class="doc-table">
+          <thead><tr><th>Color</th><th>Meaning</th></tr></thead>
+          <tbody>
+            <tr><td>Green</td><td>Safe zone.</td></tr>
+            <tr><td>Yellow</td><td>1 minute left — warning.</td></tr>
+            <tr><td>Red</td><td>30 seconds left or overtime — final phase.</td></tr>
+          </tbody>
+        </table>
+
+        <h3>Audio &amp; Flash Alerts</h3>
+        <ul>
+          <li><strong>Flashes</strong>: screen flashes yellow/red as time runs down.</li>
+          <li><strong>Alarm</strong>: plays once when time expires.</li>
+        </ul>
+        <p class="doc-tip">Tip: on the Display page, click/tap once or press <kbd>F</kbd> to arm audio (browser requirement).</p>
+
+        <h3>Rooms &amp; Multi-Device Setup</h3>
+        <ul>
+          <li>Opening Control creates a new room with a unique 4-char code.</li>
+          <li>Display joins with the same code: <code>/display?room=ABCD</code>.</li>
+          <li>Use <strong>Copy Link</strong> to share the display instantly.</li>
+          <li>To start fresh, open a new Control page (new room auto-generated).</li>
+          <li>If Control glitches: refresh; if still off, open base URL without <code>?room=...</code>.</li>
+        </ul>
+
+        <h3>Settings Dropdown (⚙️)</h3>
+        <ul>
+          <li>Open/close via gear in the top-right.</li>
+          <li>View or re-enter Room Code, copy Display Link, confirm connection.</li>
+          <li>Panel open/closed preference is remembered.</li>
+        </ul>
+
+        <h3>Troubleshooting</h3>
+        <ul>
+          <li>Run Control on your main device; open Display on a second screen.</li>
+          <li>If visuals/audio bug out: <strong>Reset</strong> → refresh → open base URL.</li>
+          <li>Fullscreen display: click anywhere or press <kbd>F</kbd>.</li>
+        </ul>
+      </div>
+
+      <footer class="modal-footer">
+        <button id="helpClose2" class="button" type="button">Close</button>
+      </footer>
+    </div>
+  </div>
+
   <script type="module" src="/control.js"></script>
+  <noscript><div style="padding:1rem;text-align:center;">JavaScript is required.</div></noscript>
 </body>
 </html>

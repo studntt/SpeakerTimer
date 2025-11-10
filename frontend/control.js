@@ -285,6 +285,82 @@ function tick() {
   requestAnimationFrame(tick);
 }
 
+// ===== Help Modal (subtle link + H shortcut) =====
+const helpLink     = document.getElementById("helpLink");
+const helpModal    = document.getElementById("helpModal");
+const helpBackdrop = document.getElementById("helpBackdrop");
+const helpClose    = document.getElementById("helpClose");
+const helpClose2   = document.getElementById("helpClose2");
+
+let lastFocusedEl = null;
+let trapFocusHandler = null;
+let modalKeyHandler = null;
+
+function openHelp() {
+  if (!helpModal || !helpBackdrop) return;
+  if (!helpModal.hasAttribute("hidden")) return;
+
+  lastFocusedEl = document.activeElement;
+
+  helpBackdrop.hidden = false;
+  helpModal.hidden = false;
+  document.body.classList.add("no-scroll");
+
+  // Focus trap inside modal
+  const sel = 'button,[href],input,select,textarea,[tabindex]:not([tabindex="-1"])';
+  const nodes = helpModal.querySelectorAll(sel);
+  const first = nodes[0];
+  const last  = nodes[nodes.length - 1];
+
+  trapFocusHandler = (e) => {
+    if (e.key !== "Tab") return;
+    if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last?.focus(); }
+    else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first?.focus(); }
+  };
+  helpModal.addEventListener("keydown", trapFocusHandler);
+
+  // Modal-level keys: Esc closes; H toggles close (debounced)
+  let hArm = true;
+  modalKeyHandler = (e) => {
+    if (e.key === "Escape") { e.preventDefault(); closeHelp(); }
+    if ((e.key === "h" || e.key === "H") && hArm) {
+      e.preventDefault(); hArm = false; closeHelp(); setTimeout(()=>hArm=true,150);
+    }
+  };
+  window.addEventListener("keydown", modalKeyHandler);
+
+  (first || helpModal).focus();
+}
+function closeHelp() {
+  if (!helpModal || helpModal.hasAttribute("hidden")) return;
+  helpModal.hidden = true;
+  helpBackdrop.hidden = true;
+  document.body.classList.remove("no-scroll");
+
+  if (trapFocusHandler) helpModal.removeEventListener("keydown", trapFocusHandler);
+  if (modalKeyHandler) window.removeEventListener("keydown", modalKeyHandler);
+  trapFocusHandler = null;
+  modalKeyHandler = null;
+
+  if (lastFocusedEl && typeof lastFocusedEl.focus === "function") lastFocusedEl.focus();
+}
+
+// Click handlers
+helpLink?.addEventListener("click", (e) => { e.preventDefault(); openHelp(); });
+helpClose?.addEventListener("click", closeHelp);
+helpClose2?.addEventListener("click", closeHelp);
+helpBackdrop?.addEventListener("click", closeHelp);
+
+// Global H to open when closed (debounced)
+(() => {
+  let hArm = true;
+  window.addEventListener("keydown", (e) => {
+    if ((e.key === "h" || e.key === "H") && helpModal?.hasAttribute("hidden") && hArm) {
+      e.preventDefault(); hArm = false; openHelp(); setTimeout(()=>hArm=true,150);
+    }
+  });
+})();
+
 // Init
 (function init() {
   const room = (qs.get("room") || randomRoom()).toUpperCase();
@@ -296,9 +372,7 @@ function tick() {
   syncedReceivedAt = performance.now();
 
   if (roomPanel && panelToggle) {
-    const saved = (() => {
-      try { return localStorage.getItem(PANEL_LS_KEY); } catch { return null; }
-    })();
+    const saved = (() => { try { return localStorage.getItem(PANEL_LS_KEY); } catch { return null; } })();
     saved === "1" ? openPanel() : closePanel();
   }
 

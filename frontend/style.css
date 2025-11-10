@@ -248,12 +248,47 @@ button.primary:hover{ background:#29d66c; border-color:#29d66c; }
   font-weight:700;
 }
 
-/* Hints */
+/* Hints / tips */
 .hint{
   color:#a5aab4;
   font-size:.9rem;
   margin:.25rem 0 0;
 }
+.tip-line{
+  color:#a5aab4;
+  font-size:.92rem;
+  text-align:center;
+  margin:.3rem 0 0;
+}
+
+/* ===== Help line directly under tip ===== */
+.help-line{
+  color:#aeb3bd;
+  font-size:.92rem;
+  text-align:center;
+  margin:.25rem 0 0;
+  opacity:.75;
+  transition: opacity .15s ease;
+}
+.help-line:hover{ opacity:1; }
+.help-line kbd{
+  background:#1b1c1f;
+  border:1px solid #2a2d31;
+  border-radius:6px;
+  padding:2px 6px;
+  font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size:.9em;
+  color:#e5e7eb;
+}
+.help-link{
+  color:#e5e7eb;
+  text-decoration:none;
+  border-radius:6px;
+  padding:2px 4px;
+  opacity:.85;
+  transition: opacity .15s ease, text-decoration-color .15s ease;
+}
+.help-line:hover .help-link{ opacity:1; text-decoration:underline; text-decoration-color:#3b82f6; }
 
 /* Make anchor styled like buttons keep spacing parity */
 a.button{ display:inline-flex; align-items:center; }
@@ -337,13 +372,62 @@ a.button{ display:inline-flex; align-items:center; }
 /* Ensure inner spacing looks nice when panel opens */
 .dropdown-panel .row:first-child{ margin-top:.25rem; }
 
+/* ===== Modal (dark, rounded, inner scroll) ===== */
+.modal-backdrop{
+  position:fixed; inset:0;
+  background:rgba(0,0,0,.55);
+  backdrop-filter:saturate(110%) blur(2px);
+  z-index:60;
+}
+.modal{
+  position:fixed; inset:0; display:grid; place-items:center; z-index:61;
+}
+.modal[hidden], .modal-backdrop[hidden]{ display:none !important; }
+.modal-chrome{
+  background:#101114;
+  border:1px solid #202127;
+  color:#e8eaee;
+  width:min(92vw, 720px);
+  max-height:min(88vh, 900px);
+  border-radius:18px;
+  box-shadow: 0 20px 60px rgba(0,0,0,.6);
+}
+.modal-header{
+  display:flex; align-items:center; justify-content:space-between;
+  padding:14px 16px;
+  border-bottom:1px solid #202127;
+  position:sticky; top:0; background:#101114; z-index:1;
+}
+.modal-title{ margin:0; font-size:1.1rem; }
+.modal-body{
+  padding:16px;
+  overflow:auto;
+  max-height:calc(min(88vh, 900px) - 120px);
+}
+.modal-footer{
+  padding:12px 16px;
+  border-top:1px solid #202127;
+  display:flex; justify-content:flex-end; gap:8px;
+  position:sticky; bottom:0; background:#101114;
+}
+
+/* Documentation table inside modal */
+.doc-table{ width:100%; border-collapse:collapse; margin:8px 0 16px; }
+.doc-table th, .doc-table td{ border:1px solid #2a2c33; padding:8px 10px; text-align:left; }
+.doc-tip{ color:#cbd5e1; }
+
+/* Prevent background scroll when modal is open */
+.no-scroll{ overflow:hidden; }
+
 /* Responsive */
 @media (max-width: 540px){
   .control-wrap{ padding:1.25rem 1rem 2rem; }
   .row{ gap:.45rem; }
   input{ min-width: 110px; }
   .icon-button{ width:36px; height:36px; border-radius:10px; }
+  .help-line{ font-size:.9rem; }
 }
+
 /* ===== Expired message (Display page) ===== */
 .expired-msg {
   grid-row: 4;
@@ -356,13 +440,7 @@ a.button{ display:inline-flex; align-items:center; }
   opacity: 0;
   transition: opacity 0.6s ease;
 }
-
-.expired-msg:not([hidden]) {
-  opacity: 1;
-}
-
+.expired-msg:not([hidden]) { opacity: 1; }
 @media (prefers-reduced-motion: reduce) {
-  .expired-msg {
-    transition: none;
-  }
+  .expired-msg { transition: none; }
 }
