@@ -1,9 +1,9 @@
-// control.js (authority-driven; no local time math; locked 3:00 + fixed resume logic)
+// control.js (authority-driven; adjustable default 3:00; reset restores default; free pre-start adjust)
 
 const qs = new URLSearchParams(location.search);
 
-// ===== LOCKED DURATION (3:00) =====
-const LOCKED_DURATION_MS = 180_000;
+// ===== DEFAULT DURATION (3:00) =====
+const DEFAULT_DURATION_MS = 180_000;
 
 // DOM
 const roomInput   = document.getElementById("room");
@@ -20,7 +20,6 @@ const copyBtn     = document.getElementById("copyLink");
 const timeInput   = document.getElementById("timeInput");
 const timeHint    = document.getElementById("timeHint");
 
-// Preset chips (hidden)
 const presets = {
   preset30: 30_000,
   preset60: 60_000,
@@ -33,16 +32,16 @@ let ws;
 let state = {
   roomId: "DEMO",
   status: "idle",
-  durationMs: LOCKED_DURATION_MS,
+  durationMs: DEFAULT_DURATION_MS,
   deadlineMs: null,
-  remainingMs: LOCKED_DURATION_MS,
+  remainingMs: DEFAULT_DURATION_MS,
   serverNow: Date.now(),
 };
 
 let syncedBaseRemainingMs = state.remainingMs;
 let syncedReceivedAt = performance.now();
 let lastInputEcho = "";
-let pushedLockedOnce = false;
+let pushedOnce = false;
 
 // ---------- Utils ----------
 function randomRoom() {
@@ -94,7 +93,7 @@ function updateDisplayLink(room) {
 }
 function echoTimeInputIfNeeded() {
   if (!timeInput) return;
-  const desired = "3:00";
+  const desired = fmt(state.remainingMs || DEFAULT_DURATION_MS);
   if (document.activeElement === timeInput) timeInput.blur();
   if (desired !== lastInputEcho) {
     timeInput.value = desired;
@@ -117,14 +116,6 @@ function updateUI() {
   echoTimeInputIfNeeded();
 }
 
-// ---------- Enforce 3:00 ----------
-function enforceLockedDuration() {
-  if (state.durationMs !== LOCKED_DURATION_MS) {
-    state.durationMs = LOCKED_DURATION_MS;
-    setDuration(LOCKED_DURATION_MS);
-  }
-}
-
 // ---------- WebSocket ----------
 function connect(room) {
   if (ws) ws.close();
@@ -137,17 +128,15 @@ function connect(room) {
 
   ws.onopen = () => {
     try { ws.send(JSON.stringify({ type: "requestSnapshot" })); } catch {}
-    if (!pushedLockedOnce) {
+    if (!pushedOnce) {
       setTimeout(() => {
-        setDuration(LOCKED_DURATION_MS);
-        pushedLockedOnce = true;
+        setDuration(DEFAULT_DURATION_MS);
+        pushedOnce = true;
       }, 100);
     }
   };
 
-  ws.onerror = (err) => {
-    console.warn("[control] WebSocket error:", err);
-  };
+  ws.onerror = (err) => console.warn("[control] WebSocket error:", err);
 
   ws.onmessage = (ev) => {
     let parsed;
@@ -156,7 +145,7 @@ function connect(room) {
     if (type !== "snapshot" || !payload) return;
 
     state.status = payload.status ?? state.status;
-    state.durationMs = LOCKED_DURATION_MS;
+    state.durationMs = payload.durationMs ?? state.durationMs;
     state.serverNow = typeof payload.serverNow === "number" ? payload.serverNow : Date.now();
 
     const nowMono = performance.now();
@@ -167,7 +156,7 @@ function connect(room) {
       state.deadlineMs = payload.deadlineMs;
       state.remainingMs = undefined;
     } else {
-      const rem = typeof payload.remainingMs === "number" ? payload.remainingMs : LOCKED_DURATION_MS;
+      const rem = typeof payload.remainingMs === "number" ? payload.remainingMs : state.remainingMs;
       syncedBaseRemainingMs = Math.max(0, rem);
       syncedReceivedAt = nowMono;
       state.deadlineMs = null;
@@ -183,17 +172,18 @@ function connect(room) {
 }
 
 function send(type, payload = {}) {
-  if (ws?.readyState === WebSocket.OPEN) {
-    ws.send(JSON.stringify({ type, payload }));
-  }
+  if (ws?.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type, payload }));
 }
 
 // ---------- Commands ----------
 function setDuration(ms) { send("setDuration", { durationMs: ms }); }
-function start() { send("start", { durationMs: LOCKED_DURATION_MS }); }
+function start() { send("start", { durationMs: state.remainingMs }); }
 function pause() { send("pause"); }
 function resume() { send("resume"); }
-function reset() { send("reset"); }
+function resetToDefault() {
+  send("setDuration", { durationMs: DEFAULT_DURATION_MS });
+  send("reset");
+}
 
 // ---------- Bindings ----------
 document.getElementById("minus30")?.addEventListener("click", () => send("adjustTime", { deltaMs: -30_000 }));
@@ -210,28 +200,20 @@ Object.keys(presets).forEach((id) => {
   }
 });
 
-// ✅ FIXED: Proper resume/start logic
+// ✅ Cleaned up start/resume/reset flow
 startBtn?.addEventListener("click", () => {
-  enforceLockedDuration();
   if (state.status === "paused") {
     resume();
   } else if (state.status === "idle" || state.status === "finished") {
     start();
-  } else {
-    // running → ignore click
   }
 });
-
 pauseBtn?.addEventListener("click", () => pause());
-resetBtn?.addEventListener("click", () => {
-  enforceLockedDuration();
-  reset();
-});
+resetBtn?.addEventListener("click", () => resetToDefault());
 
 if (timeInput) {
   timeInput.disabled = true;
   timeInput.readOnly = true;
-  timeInput.value = "3:00";
   timeInput.style.display = "none";
 }
 if (timeHint) timeHint.style.display = "none";
@@ -255,7 +237,7 @@ joinBtn.onclick = () => {
   history.replaceState(null, "", `?room=${room}`);
   updateDisplayLink(room);
   connect(room);
-  setTimeout(() => setDuration(LOCKED_DURATION_MS), 50);
+  setTimeout(() => setDuration(DEFAULT_DURATION_MS), 50);
   updateUI();
 };
 
@@ -287,25 +269,15 @@ function closePanel() {
   panelToggle.setAttribute("aria-expanded", "false");
   try { localStorage.setItem(PANEL_LS_KEY, "0"); } catch {}
 }
-function togglePanel() {
-  if (!roomPanel || !panelToggle) return;
-  isPanelOpen() ? closePanel() : openPanel();
-}
+function togglePanel() { isPanelOpen() ? closePanel() : openPanel(); }
 
-panelToggle?.addEventListener("click", (e) => {
-  e.stopPropagation();
-  togglePanel();
-});
+panelToggle?.addEventListener("click", (e) => { e.stopPropagation(); togglePanel(); });
 document.addEventListener("click", (e) => {
-  if (!roomPanel || !panelToggle) return;
-  if (!isPanelOpen()) return;
-  const target = e.target;
-  const inside = roomPanel.contains(target) || panelToggle.contains(target);
+  if (!roomPanel || !panelToggle || !isPanelOpen()) return;
+  const inside = roomPanel.contains(e.target) || panelToggle.contains(e.target);
   if (!inside) closePanel();
 });
-document.addEventListener("keydown", (e) => {
-  if (e.key === "Escape" && isPanelOpen()) closePanel();
-});
+document.addEventListener("keydown", (e) => { if (e.key === "Escape" && isPanelOpen()) closePanel(); });
 
 // Loop
 function tick() {
@@ -320,12 +292,7 @@ function tick() {
   updateDisplayLink(room);
   joinBtn.click();
 
-  if (timeInput) {
-    timeInput.value = "3:00";
-    lastInputEcho = "3:00";
-  }
-
-  syncedBaseRemainingMs = LOCKED_DURATION_MS;
+  syncedBaseRemainingMs = DEFAULT_DURATION_MS;
   syncedReceivedAt = performance.now();
 
   if (roomPanel && panelToggle) {

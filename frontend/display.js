@@ -1,4 +1,4 @@
-// display.js (authoritative-deadline client; fixed thresholds; stable flashing + end alarm w/ reset-stop + fullscreen-safe overlay)
+// display.js (authoritative-deadline client; fixed thresholds; stable flashing + end alarm w/ reset-stop + fullscreen-safe overlay + 2.5s alarm limit)
 
 const qs = new URLSearchParams(location.search);
 
@@ -8,7 +8,7 @@ let els = {
   statusMsg: null,
   subline: null,
   stage: null,
-  expiredMsg: null, // NEW
+  expiredMsg: null,
 };
 
 // Local view state (render-only)
@@ -23,11 +23,8 @@ let state = {
   remainingMs: 180_000,
 };
 
-// Latency-compensated base remaining
 let syncedBaseRemainingMs = state.remainingMs;
 let syncedReceivedAt = performance.now();
-
-// Track last phase
 let lastPhase = null;
 
 // ---------- Flash overlay ----------
@@ -86,7 +83,7 @@ const alarm = {
   hadPositive: false,
   ensureAudio() {
     if (this.audio) return;
-    this.audio = new Audio("/audio/alarm2.mp3");
+    this.audio = new Audio("/audio/alarm.mp3");
     this.audio.preload = "auto";
     this.audio.volume = 0.35;
   },
@@ -111,8 +108,21 @@ const alarm = {
       this.audio.currentTime = 0;
       const p = this.audio.play();
       if (p && typeof p.then === "function") {
-        p.then(() => (this.didPlay = true)).catch(() => {});
-      } else this.didPlay = true;
+        p.then(() => {
+          this.didPlay = true;
+          // Limit playback to 2.5 seconds
+          setTimeout(() => {
+            this.audio.pause();
+            this.audio.currentTime = 0;
+          }, 2500);
+        }).catch(() => {});
+      } else {
+        this.didPlay = true;
+        setTimeout(() => {
+          this.audio.pause();
+          this.audio.currentTime = 0;
+        }, 2500);
+      }
     } catch {}
   },
   stop() {
@@ -232,7 +242,6 @@ function connect(room) {
     badge.style.display = "none";
   };
 
-  // ✅ Increased reconnect delay to 2500ms
   ws.onclose = () => {
     connected = false;
     const badge = ensureStatusMsg();
@@ -283,7 +292,6 @@ function connect(room) {
       state.remainingMs = rem;
     }
 
-    // Reset logic
     if (
       state.status === "idle" &&
       typeof state.durationMs === "number" &&
@@ -311,7 +319,6 @@ function connect(room) {
     lastPhase = null;
   };
 
-  // ✅ Added safe error handling
   ws.onerror = (err) => {
     console.warn("[display] WebSocket error:", err?.message || err);
   };
