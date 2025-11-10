@@ -75,15 +75,11 @@ function remainingFromAuthoritative(s, at = now()) {
 /** Keep legacy fields (t0/elapsedPausedMs) consistent with authoritative ones. */
 function syncLegacyFields(s) {
   if (s.status === "running" && typeof s.deadlineMs === "number") {
-    // Set t0 so legacy clients compute the same remaining
-    // remaining = duration - (now - t0 + elapsedPausedMs)
-    // Choose elapsedPausedMs = duration - remaining at this instant, t0 = now
     const rem = clamp(s.deadlineMs - now(), 0, s.durationMs);
     s.elapsedPausedMs = clamp(s.durationMs - rem, 0, s.durationMs);
     s.t0 = now();
     return;
   }
-  // paused/idle/finished: encode elapsedPausedMs as "consumed" time
   const rem = clamp(s.remainingMs, 0, s.durationMs);
   s.elapsedPausedMs = clamp(s.durationMs - rem, 0, s.durationMs);
   s.t0 = null;
@@ -164,7 +160,6 @@ wss.on("connection", (ws, req) => {
 
     switch (type) {
       case "start": {
-        // Start fresh from configured duration (control enforces 3:00)
         const durationMs = Math.max(
           1000,
           Number(payload?.durationMs ?? s.durationMs)
@@ -213,7 +208,6 @@ wss.on("connection", (ws, req) => {
           1000,
           Number(payload?.durationMs ?? s.durationMs)
         );
-        // Adjust duration while preserving current remaining where possible.
         const currentRem = clamp(
           remainingFromAuthoritative(s, n),
           0,
@@ -237,15 +231,12 @@ wss.on("connection", (ws, req) => {
       case "adjustTime": {
         const delta = Number(payload?.deltaMs ?? 0);
         if (s.status === "running" && typeof s.deadlineMs === "number") {
-          // Shift the deadline (authoritative)
-          const minDeadline = n + 1000; // don't allow negative/instant expiry
+          const minDeadline = n + 1000;
           s.deadlineMs = Math.max(minDeadline, s.deadlineMs + delta);
           s.updatedAt = n;
-          // keep remainingMs in sync for completeness
           s.remainingMs = clamp(s.deadlineMs - n, 0, s.durationMs);
           syncLegacyFields(s);
         } else {
-          // paused/idle: adjust remaining within [0, duration]
           const newRem = clamp(s.remainingMs + delta, 0, s.durationMs);
           s.remainingMs = newRem;
           s.updatedAt = n;
@@ -276,7 +267,6 @@ wss.on("connection", (ws, req) => {
       }
 
       case "requestSnapshot": {
-        // no-op; handled by broadcast below
         break;
       }
 
@@ -290,6 +280,10 @@ wss.on("connection", (ws, req) => {
 
   ws.on("close", () => {
     room.clients.delete(ws);
+    // ✅ Cleanup empty rooms to prevent memory buildup
+    if (room.clients.size === 0) {
+      rooms.delete(roomId);
+    }
   });
 });
 
