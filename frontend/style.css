@@ -1,0 +1,346 @@
+:root{
+  --bg:#000; --fg:#00ff62; --muted:#9ca3af;
+  --green:#22c55e; --yellow:#facc15; --red:#ef4444;
+  --card:#0f0f10; --card-edge:#1a1a1c; --card-glow:rgba(255,255,255,.04);
+
+  /* accents for control buttons */
+  --dark-green:#14532d;
+  --dark-green-2:#166534;
+  --light-green:#34d399;
+}
+
+/* ===================== DISPLAY (unchanged) ===================== */
+.display-body{
+  margin:0; background:var(--bg); color:var(--fg);
+  font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+  font-variant-numeric: tabular-nums;
+}
+
+.stage{
+  position:fixed; inset:0; display:grid; place-items:center;
+  grid-template-rows: 1fr auto auto 1fr;
+  row-gap: 2vh;
+}
+
+.status-msg{
+  grid-row:2; color:var(--muted); font-size:clamp(1rem, 2vw, 1.5rem);
+}
+
+.count{
+  grid-row:3;
+  font-size: clamp(8rem, 18vw, 40rem);
+  line-height:1; text-align:center; letter-spacing:0.02em;
+  transition: text-shadow .2s ease, color .2s ease, opacity .2s ease;
+}
+
+.subline{
+  grid-row:4; text-align:center; color:var(--muted);
+  font-size:clamp(.9rem, 1.5vw, 1.2rem); margin-top:-1.2rem;
+}
+
+.phase-green{ color: var(--fg); text-shadow: none; }
+.phase-yellow{ color: var(--yellow); text-shadow: 0 0 .5rem rgba(250, 204, 21, .25); }
+.phase-red{ color: var(--red); text-shadow: 0 0 .6rem rgba(239, 68, 68, .35); }
+
+.overtime::before{ content:"+"; margin-right:.1em; }
+
+@keyframes pulse-soft { 
+  0%{ opacity: .9; } 
+  50%{ opacity: 1; } 
+  100%{ opacity: .9; } 
+}
+.pulse{ animation: pulse-soft 1s ease-in-out infinite; }
+
+/* ===== Screen flash overlay (3 pulses at yellow/red) ===== */
+@keyframes st-flash {
+  0%, 100% { opacity: 0; }
+  50%      { opacity: .9; }
+}
+.st-flash-overlay{
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 2147483646;
+  opacity: 0;
+  display: none;
+  mix-blend-mode: normal; /* keep digits readable */
+}
+.st-flash-yellow{
+  background: var(--yellow);
+  animation: st-flash 700ms ease-in-out 3;
+}
+.st-flash-red{
+  background: var(--red);
+  animation: st-flash 700ms ease-in-out 3;
+}
+@media (prefers-reduced-motion: reduce){
+  .st-flash-yellow,
+  .st-flash-red{
+    animation-duration: 700ms;
+    animation-iteration-count: 1; /* single soft fade for accessibility */
+  }
+}
+
+/* ===================== CONTROL (modern minimal) ===================== */
+.control-body {
+  margin: 0;
+  background: #0b0b0c;
+  color: #f5f5f5;
+  font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  font-variant-numeric: tabular-nums;
+  display: flex;
+  justify-content: center;
+  min-height: 100vh;
+}
+
+.control-wrap {
+  width: 100%;
+  max-width: 780px;
+  padding: 2rem 1.5rem 3rem;
+}
+
+/* ---- Topbar with toggle ---- */
+.topbar{
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:.75rem;
+  margin:0 0 1rem;
+}
+.icon-button{
+  display:inline-flex;
+  align-items:center;
+  justify-content:center;
+  width:40px; height:40px;
+  border-radius:12px;
+  background:#16171a;
+  border:1px solid #2a2d31;
+  color:#f5f5f5;
+  cursor:pointer;
+  transition: background .15s ease, border .15s ease, transform .05s ease;
+}
+.icon-button:hover{ background:#1e2024; border-color:#353940; }
+.icon-button:active{ transform: translateY(1px); }
+.icon-button:focus{ outline:none; box-shadow:0 0 0 3px rgba(255,255,255,.12); }
+
+h1 {
+  font-size: 1.9rem;
+  font-weight: 700;
+  margin: 0;
+}
+
+/* --- Cards --- */
+.card{
+  background: linear-gradient(180deg, rgba(255,255,255,.02), rgba(255,255,255,.0));
+  border: 1px solid var(--card-edge);
+  border-radius: 16px;
+  box-shadow: 0 8px 24px var(--card-glow);
+  padding: 1rem;
+  margin: 0 0 1rem;
+  backdrop-filter: blur(6px);
+}
+.section-title{
+  font-size: .95rem;
+  color: #c9c9c9;
+  margin: 0 0 .5rem;
+}
+
+/* Utility */
+.visually-hidden{
+  position:absolute; width:1px; height:1px; padding:0; margin:-1px; overflow:hidden; clip:rect(0,0,0,0); white-space:nowrap; border:0;
+}
+
+/* Rows */
+.row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: .6rem;
+  margin-bottom: .6rem;
+}
+
+/* Inputs */
+label{ font-size:.95rem; color:#cfcfcf; }
+input {
+  background: #111214;
+  border: 1px solid #292b2f;
+  border-radius: 10px;
+  color: #f5f5f5;
+  padding: 0.7rem 0.9rem;
+  font-size: 1rem;
+  min-width: 120px;
+  outline: none;
+  transition: border .15s ease, box-shadow .15s ease;
+}
+input:focus{
+  border-color:#3b3f46;
+  box-shadow: 0 0 0 3px rgba(59,130,246,.15);
+}
+.input-error{
+  border-color: var(--red) !important;
+  box-shadow: 0 0 0 3px rgba(239,68,68,.2);
+}
+
+/* Buttons / Links */
+button, a.button {
+  background: #16171a;
+  border: 1px solid #2a2d31;
+  border-radius: 12px;
+  padding: 0.7rem 1rem;
+  font-size: 1rem;
+  color: #f5f5f5;
+  cursor: pointer;
+  transition: transform .05s ease, background .15s ease, border .15s ease, filter .15s ease;
+  user-select: none;
+  text-decoration: none;
+}
+button:hover, a.button:hover { background:#1e2024; border-color:#353940; }
+button:active, a.button:active { transform: translateY(1px); }
+button:disabled{ opacity:.55; cursor:not-allowed; }
+
+button.primary, .button.primary {
+  background: var(--green);
+  border-color: var(--green);
+  color: #000;
+  font-weight: 700;
+}
+button.primary:hover{ background:#29d66c; border-color:#29d66c; }
+
+/* Status pill */
+.status-pill {
+  display: inline-block;
+  padding: 0.35rem 0.85rem;
+  border-radius: 999px;
+  font-size: 0.8rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  background: #202226;
+  border: 1px solid #2c2f35;
+  color: #a9b0bb;
+}
+.status-running { background: var(--green); color:#000; }
+.status-paused  { background: var(--yellow); color:#000; }
+.status-finished{ background: var(--red); color:#fff; }
+
+/* Timer preview */
+.time-big {
+  font-size: clamp(3.2rem, 9vw, 6.2rem);
+  font-weight: 800;
+  text-align: center;
+  color: #fafafa;
+  margin: .6rem 0;
+}
+/* Progress track removed visually */
+.timer-card .progress{ display:none !important; }
+.timer-card .phase{ display:none; } /* reserved hook */
+
+/* ===== Controls (single horizontal row) ===== */
+.controls{
+  display:flex;
+  justify-content:center;
+  align-items:center;
+  gap:.6rem;
+  flex-wrap:wrap;
+  margin-bottom:.2rem;
+}
+.controls .button{
+  min-width:84px;
+  font-weight:700;
+}
+
+/* Hints */
+.hint{
+  color:#a5aab4;
+  font-size:.9rem;
+  margin:.25rem 0 0;
+}
+
+/* Make anchor styled like buttons keep spacing parity */
+a.button{ display:inline-flex; align-items:center; }
+
+/* ===== Custom button colors ===== */
+.btn-dark-green{
+  background: var(--dark-green);
+  border-color: var(--dark-green-2);
+  color:#eaffea;
+  font-weight:700;
+}
+.btn-dark-green:hover{ background: var(--dark-green-2); border-color:#16a34a; }
+
+.btn-yellow{
+  background: var(--yellow);
+  border-color: var(--yellow);
+  color:#000;
+  font-weight:700;
+}
+.btn-yellow:hover{ filter: brightness(1.05); }
+
+.btn-red{
+  background: var(--red);
+  border-color: var(--red);
+  color:#fff;
+  font-weight:700;
+}
+.btn-red:hover{ filter: brightness(1.05); }
+
+.btn-light-green{
+  background: var(--light-green);
+  border-color: var(--light-green);
+  color:#002410;
+  font-weight:700;
+}
+.btn-light-green:hover{ filter: brightness(1.05); }
+
+/* Focus ring for colored buttons */
+.btn-dark-green:focus,
+.btn-yellow:focus,
+.btn-red:focus,
+.btn-light-green:focus{
+  outline: none;
+  box-shadow: 0 0 0 3px rgba(255,255,255,.12);
+}
+
+/* ===== Dropdown panel behavior ===== */
+.dropdown-panel{
+  /* hidden by default; JS toggles is-open/is-closed */
+  will-change: transform, opacity, height;
+  transition:
+    opacity .22s ease,
+    transform .22s ease,
+    height .22s ease,
+    margin .22s ease,
+    padding .22s ease;
+  overflow: hidden;
+}
+
+/* Closed state */
+.dropdown-panel.is-closed{
+  opacity: 0;
+  transform: translateY(-8px);
+  height: 0;
+  padding-top: 0 !important;
+  padding-bottom: 0 !important;
+  margin-bottom: 0 !important;
+  pointer-events: none;
+  visibility: hidden;
+}
+
+/* Open state */
+.dropdown-panel.is-open{
+  opacity: 1;
+  transform: translateY(0);
+  height: auto; /* content height */
+  pointer-events: auto;
+  visibility: visible;
+}
+
+/* Ensure inner spacing looks nice when panel opens */
+.dropdown-panel .row:first-child{ margin-top:.25rem; }
+
+/* Responsive */
+@media (max-width: 540px){
+  .control-wrap{ padding:1.25rem 1rem 2rem; }
+  .row{ gap:.45rem; }
+  input{ min-width: 110px; }
+  .icon-button{ width:36px; height:36px; border-radius:10px; }
+}

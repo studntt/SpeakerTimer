@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Speaker Timer — Display</title>
+
+  <!-- Relative paths so assets load from nested routes/subpaths -->
+  <link rel="stylesheet" href="./style.css" />
+</head>
+<body class="display-body">
+  <main id="stage" class="stage" role="main">
+    <div id="statusMsg" class="status-msg" aria-live="polite">Connecting…</div>
+    <!-- Initial value matches locked duration (3:00) and default phase is GREEN -->
+    <div id="count" class="count phase-green" aria-live="polite">03:00</div>
+    <div id="subline" class="subline"></div>
+  </main>
+
+  <!-- Relative module path -->
+  <script type="module" src="./display.js"></script>
+
+  <noscript>
+    <div style="padding:1rem; text-align:center;">
+      JavaScript is required for the Speaker Timer display to function.
+    </div>
+  </noscript>
+</body>
+</html>
+

@@ -1,0 +1,64 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Speaker Timer — Control</title>
+  <link rel="stylesheet" href="/style.css" />
+</head>
+<body class="control-body">
+  <main class="control-wrap">
+    <header class="topbar">
+      <h1>Speaker Timer</h1>
+      <!-- Top-right toggle for Room/Link panel -->
+      <button id="panelToggle"
+              class="icon-button"
+              aria-label="Toggle room and link panel"
+              aria-controls="roomPanel"
+              aria-expanded="false"
+              type="button">
+        <!-- simple icon glyph; style via CSS -->
+        <span aria-hidden="true">⚙️</span>
+      </button>
+    </header>
+
+    <!-- Room / Link (collapsible) -->
+    <section id="roomPanel"
+             class="card room-card dropdown-panel is-closed"
+             aria-labelledby="roomHeading"
+             aria-hidden="true">
+      <h2 id="roomHeading" class="visually-hidden">Room</h2>
+      <div class="row" role="group" aria-label="Room controls">
+        <label for="room">Room code</label>
+        <input id="room" aria-label="Room code" />
+        <button id="join" class="button primary">Join</button>
+        <a id="openDisplay" class="button" target="_blank" rel="noopener">Open Display</a>
+        <button id="copyLink" class="button" type="button">Copy Link</button>
+        <span id="status" class="status-pill">IDLE</span>
+      </div>
+      <p class="hint">Anyone with the link can open the display.</p>
+    </section>
+
+    <!-- Timer preview (locked to 03:00). Progress track removed. -->
+    <section class="card timer-card" aria-labelledby="timerHeading">
+      <h2 id="timerHeading" class="visually-hidden">Timer</h2>
+      <div class="time-big" id="preview" aria-live="polite">03:00</div>
+    </section>
+
+    <!-- Controls (single horizontal row) -->
+    <section class="card controls-card" aria-labelledby="controlsHeading">
+      <h2 id="controlsHeading" class="visually-hidden">Controls</h2>
+      <div class="controls" role="group" aria-label="Timer controls">
+        <button id="start" class="button btn-dark-green">Start</button>
+        <button id="pause" class="button btn-yellow">Pause</button>
+        <button id="reset" class="button">Reset</button>
+        <button id="minus30" type="button" class="button btn-red" aria-label="Subtract 30 seconds">−30s</button>
+        <button id="plus30"  type="button" class="button btn-light-green" aria-label="Add 30 seconds">+30s</button>
+      </div>
+    </section>
+  </main>
+
+  <script type="module" src="/control.js"></script>
+</body>
+</html>
+
