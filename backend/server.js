@@ -13,6 +13,9 @@ const app = express();
 app.get("/healthz", (_req, res) => res.status(200).send("ok"));
 app.use(express.static(FRONT, { extensions: ["html"] }));
 
+// Default route -> Control screen
+app.get("/", (_req, res) => res.redirect("/control"));
+
 // Convenience routes
 app.get("/control", (_req, res) =>
   res.sendFile(path.join(FRONT, "control.html"))
@@ -128,7 +131,12 @@ wss.on("connection", (ws, req) => {
   // Initial snapshot
   finalizeIfElapsed(roomId);
   syncLegacyFields(room.state);
-  ws.send(JSON.stringify({ type: "snapshot", payload: { ...room.state, serverNow: now() } }));
+  ws.send(
+    JSON.stringify({
+      type: "snapshot",
+      payload: { ...room.state, serverNow: now() },
+    })
+  );
 
   ws.on("message", (data) => {
     let msg;
@@ -157,7 +165,10 @@ wss.on("connection", (ws, req) => {
     switch (type) {
       case "start": {
         // Start fresh from configured duration (control enforces 3:00)
-        const durationMs = Math.max(1000, Number(payload?.durationMs ?? s.durationMs));
+        const durationMs = Math.max(
+          1000,
+          Number(payload?.durationMs ?? s.durationMs)
+        );
         s.status = "running";
         s.durationMs = durationMs;
         s.remainingMs = durationMs;
@@ -198,9 +209,16 @@ wss.on("connection", (ws, req) => {
       }
 
       case "setDuration": {
-        const newDur = Math.max(1000, Number(payload?.durationMs ?? s.durationMs));
+        const newDur = Math.max(
+          1000,
+          Number(payload?.durationMs ?? s.durationMs)
+        );
         // Adjust duration while preserving current remaining where possible.
-        const currentRem = clamp(remainingFromAuthoritative(s, n), 0, s.durationMs);
+        const currentRem = clamp(
+          remainingFromAuthoritative(s, n),
+          0,
+          s.durationMs
+        );
         s.durationMs = newDur;
 
         if (s.status === "running") {
