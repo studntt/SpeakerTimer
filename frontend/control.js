@@ -1,4 +1,4 @@
-// control.js (authority-driven; no local time math; locked 3:00)
+// control.js (authority-driven; no local time math; locked 3:00 + fixed resume logic)
 
 const qs = new URLSearchParams(location.search);
 
@@ -14,13 +14,13 @@ const preview     = document.getElementById("preview");
 const startBtn    = document.getElementById("start");
 const pauseBtn    = document.getElementById("pause");
 const resetBtn    = document.getElementById("reset");
-const copyBtn     = document.getElementById("copyLink"); // optional
+const copyBtn     = document.getElementById("copyLink");
 
-// Time controls are disabled/hidden (UI may still have remnants)
+// Time controls disabled
 const timeInput   = document.getElementById("timeInput");
 const timeHint    = document.getElementById("timeHint");
 
-// Preset chips (will be hidden/disabled if present)
+// Preset chips (hidden)
 const presets = {
   preset30: 30_000,
   preset60: 60_000,
@@ -34,16 +34,13 @@ let state = {
   roomId: "DEMO",
   status: "idle",
   durationMs: LOCKED_DURATION_MS,
-  // authoritative timing (mirrors server snapshots)
   deadlineMs: null,
   remainingMs: LOCKED_DURATION_MS,
   serverNow: Date.now(),
 };
 
-// Latency-compensated preview clock
 let syncedBaseRemainingMs = state.remainingMs;
 let syncedReceivedAt = performance.now();
-
 let lastInputEcho = "";
 let pushedLockedOnce = false;
 
@@ -72,31 +69,21 @@ function liveRemainingMs() {
   return Math.max(0, syncedBaseRemainingMs);
 }
 
-// ---------- UI sync ----------
+// ---------- UI ----------
 function setStatusPill(status) {
   if (!statusEl) return;
-  statusEl.classList.remove(
-    "status-running",
-    "status-paused",
-    "status-finished"
-  );
+  statusEl.classList.remove("status-running", "status-paused", "status-finished");
   statusEl.classList.add("status-pill");
   statusEl.textContent = status.toUpperCase();
   if (status === "running") statusEl.classList.add("status-running");
   if (status === "paused") statusEl.classList.add("status-paused");
   if (status === "finished") statusEl.classList.add("status-finished");
 }
-
 function setButtonsByStatus(status) {
-  if (startBtn) {
-    startBtn.textContent = status === "paused" ? "Resume" : "Start";
-  }
-  if (pauseBtn) {
-    pauseBtn.disabled = status !== "running";
-  }
-  if (timeInput) timeInput.disabled = true; // always disabled
+  if (startBtn) startBtn.textContent = status === "paused" ? "Resume" : "Start";
+  if (pauseBtn) pauseBtn.disabled = status !== "running";
+  if (timeInput) timeInput.disabled = true;
 }
-
 function updateDisplayLink(room) {
   if (!openDisplay) return;
   const href = displayUrlFor(room);
@@ -105,7 +92,6 @@ function updateDisplayLink(room) {
   openDisplay.target = "_blank";
   if (copyBtn) copyBtn.dataset.href = href;
 }
-
 function echoTimeInputIfNeeded() {
   if (!timeInput) return;
   const desired = "3:00";
@@ -115,13 +101,11 @@ function echoTimeInputIfNeeded() {
     lastInputEcho = desired;
   }
 }
-
 function setTimeHint(msg = "") {
   if (!timeHint) return;
   timeHint.textContent = msg;
   timeHint.style.visibility = "hidden";
 }
-
 function updateUI() {
   const rem = liveRemainingMs();
   if (preview) {
@@ -141,10 +125,9 @@ function enforceLockedDuration() {
   }
 }
 
-// ---------- WS ----------
+// ---------- WebSocket ----------
 function connect(room) {
   if (ws) ws.close();
-
   setStatusPill("connecting");
 
   const url = new URL(location.origin.replace(/^http/, "ws") + "/ws");
@@ -153,9 +136,7 @@ function connect(room) {
   ws = new WebSocket(url);
 
   ws.onopen = () => {
-    try {
-      ws.send(JSON.stringify({ type: "requestSnapshot" }));
-    } catch {}
+    try { ws.send(JSON.stringify({ type: "requestSnapshot" })); } catch {}
     if (!pushedLockedOnce) {
       setTimeout(() => {
         setDuration(LOCKED_DURATION_MS);
@@ -164,25 +145,19 @@ function connect(room) {
     }
   };
 
-  // ✅ Added WebSocket error handling
   ws.onerror = (err) => {
     console.warn("[control] WebSocket error:", err);
   };
 
   ws.onmessage = (ev) => {
     let parsed;
-    try {
-      parsed = JSON.parse(ev.data);
-    } catch {
-      return;
-    }
+    try { parsed = JSON.parse(ev.data); } catch { return; }
     const { type, payload } = parsed || {};
     if (type !== "snapshot" || !payload) return;
 
     state.status = payload.status ?? state.status;
     state.durationMs = LOCKED_DURATION_MS;
-    state.serverNow =
-      typeof payload.serverNow === "number" ? payload.serverNow : Date.now();
+    state.serverNow = typeof payload.serverNow === "number" ? payload.serverNow : Date.now();
 
     const nowMono = performance.now();
     if (state.status === "running" && typeof payload.deadlineMs === "number") {
@@ -192,20 +167,15 @@ function connect(room) {
       state.deadlineMs = payload.deadlineMs;
       state.remainingMs = undefined;
     } else {
-      const rem =
-        typeof payload.remainingMs === "number"
-          ? payload.remainingMs
-          : LOCKED_DURATION_MS;
+      const rem = typeof payload.remainingMs === "number" ? payload.remainingMs : LOCKED_DURATION_MS;
       syncedBaseRemainingMs = Math.max(0, rem);
       syncedReceivedAt = nowMono;
       state.deadlineMs = null;
       state.remainingMs = rem;
     }
-
     updateUI();
   };
 
-  // ✅ Increased reconnect delay to 2500ms
   ws.onclose = () => {
     setStatusPill("connecting");
     setTimeout(() => connect(room), 2500);
@@ -219,35 +189,17 @@ function send(type, payload = {}) {
 }
 
 // ---------- Commands ----------
-function setDuration(ms) {
-  send("setDuration", { durationMs: ms });
-}
-function start() {
-  send("start", { durationMs: LOCKED_DURATION_MS });
-}
-function pause() {
-  send("pause");
-}
-function resume() {
-  send("resume");
-}
-function reset() {
-  send("reset");
-}
+function setDuration(ms) { send("setDuration", { durationMs: ms }); }
+function start() { send("start", { durationMs: LOCKED_DURATION_MS }); }
+function pause() { send("pause"); }
+function resume() { send("resume"); }
+function reset() { send("reset"); }
 
 // ---------- Bindings ----------
-document.getElementById("minus30")?.addEventListener("click", () =>
-  send("adjustTime", { deltaMs: -30_000 })
-);
-document.getElementById("plus30")?.addEventListener("click", () =>
-  send("adjustTime", { deltaMs: 30_000 })
-);
-document.getElementById("minus10")?.addEventListener("click", () =>
-  send("adjustTime", { deltaMs: -10_000 })
-);
-document.getElementById("plus10")?.addEventListener("click", () =>
-  send("adjustTime", { deltaMs: 10_000 })
-);
+document.getElementById("minus30")?.addEventListener("click", () => send("adjustTime", { deltaMs: -30_000 }));
+document.getElementById("plus30")?.addEventListener("click", () => send("adjustTime", { deltaMs: 30_000 }));
+document.getElementById("minus10")?.addEventListener("click", () => send("adjustTime", { deltaMs: -10_000 }));
+document.getElementById("plus10")?.addEventListener("click", () => send("adjustTime", { deltaMs: 10_000 }));
 
 Object.keys(presets).forEach((id) => {
   const el = document.getElementById(id);
@@ -255,15 +207,21 @@ Object.keys(presets).forEach((id) => {
     el.setAttribute("aria-hidden", "true");
     el.tabIndex = -1;
     el.style.display = "none";
-    el.replaceWith(el);
   }
 });
 
+// ✅ FIXED: Proper resume/start logic
 startBtn?.addEventListener("click", () => {
   enforceLockedDuration();
-  if (state.status === "paused") resume();
-  else start();
+  if (state.status === "paused") {
+    resume();
+  } else if (state.status === "idle" || state.status === "finished") {
+    start();
+  } else {
+    // running → ignore click
+  }
 });
+
 pauseBtn?.addEventListener("click", () => pause());
 resetBtn?.addEventListener("click", () => {
   enforceLockedDuration();
@@ -276,10 +234,9 @@ if (timeInput) {
   timeInput.value = "3:00";
   timeInput.style.display = "none";
 }
-if (timeHint) {
-  timeHint.style.display = "none";
-}
+if (timeHint) timeHint.style.display = "none";
 
+// Copy display link
 copyBtn?.addEventListener("click", async () => {
   const href = copyBtn.dataset.href || openDisplay?.href || "";
   if (!href) return;
@@ -291,6 +248,7 @@ copyBtn?.addEventListener("click", async () => {
   } catch {}
 });
 
+// Join flow
 joinBtn.onclick = () => {
   const room = roomInput.value.trim().toUpperCase() || randomRoom();
   roomInput.value = room;
@@ -301,30 +259,25 @@ joinBtn.onclick = () => {
   updateUI();
 };
 
+// Button color classes
 document.getElementById("minus30")?.classList.add("btn-red");
 document.getElementById("plus30")?.classList.add("btn-light-green");
 startBtn?.classList.add("btn-dark-green");
 pauseBtn?.classList.add("btn-yellow");
 
-// =======================
-// Dropdown Panel (Control)
-// =======================
+// Dropdown panel
 const PANEL_LS_KEY = "controlRoomPanelOpen";
 const panelToggle = document.getElementById("panelToggle");
 const roomPanel = document.getElementById("roomPanel");
 
-function isPanelOpen() {
-  return roomPanel?.classList.contains("is-open");
-}
+function isPanelOpen() { return roomPanel?.classList.contains("is-open"); }
 function openPanel() {
   if (!roomPanel || !panelToggle) return;
   roomPanel.classList.add("is-open");
   roomPanel.classList.remove("is-closed");
   roomPanel.setAttribute("aria-hidden", "false");
   panelToggle.setAttribute("aria-expanded", "true");
-  try {
-    localStorage.setItem(PANEL_LS_KEY, "1");
-  } catch {}
+  try { localStorage.setItem(PANEL_LS_KEY, "1"); } catch {}
 }
 function closePanel() {
   if (!roomPanel || !panelToggle) return;
@@ -332,9 +285,7 @@ function closePanel() {
   roomPanel.classList.add("is-closed");
   roomPanel.setAttribute("aria-hidden", "true");
   panelToggle.setAttribute("aria-expanded", "false");
-  try {
-    localStorage.setItem(PANEL_LS_KEY, "0");
-  } catch {}
+  try { localStorage.setItem(PANEL_LS_KEY, "0"); } catch {}
 }
 function togglePanel() {
   if (!roomPanel || !panelToggle) return;
@@ -345,27 +296,24 @@ panelToggle?.addEventListener("click", (e) => {
   e.stopPropagation();
   togglePanel();
 });
-
 document.addEventListener("click", (e) => {
   if (!roomPanel || !panelToggle) return;
   if (!isPanelOpen()) return;
   const target = e.target;
-  const clickedInside =
-    roomPanel.contains(target) || panelToggle.contains(target);
-  if (!clickedInside) closePanel();
+  const inside = roomPanel.contains(target) || panelToggle.contains(target);
+  if (!inside) closePanel();
 });
-
 document.addEventListener("keydown", (e) => {
   if (e.key === "Escape" && isPanelOpen()) closePanel();
 });
 
-// ---------- Loop ----------
+// Loop
 function tick() {
   updateUI();
   requestAnimationFrame(tick);
 }
 
-// ---------- Init ----------
+// Init
 (function init() {
   const room = (qs.get("room") || randomRoom()).toUpperCase();
   roomInput.value = room;
@@ -382,14 +330,9 @@ function tick() {
 
   if (roomPanel && panelToggle) {
     const saved = (() => {
-      try {
-        return localStorage.getItem(PANEL_LS_KEY);
-      } catch {
-        return null;
-      }
+      try { return localStorage.getItem(PANEL_LS_KEY); } catch { return null; }
     })();
-    if (saved === "1") openPanel();
-    else closePanel();
+    saved === "1" ? openPanel() : closePanel();
   }
 
   tick();

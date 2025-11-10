@@ -280,12 +280,23 @@ wss.on("connection", (ws, req) => {
 
   ws.on("close", () => {
     room.clients.delete(ws);
-    // ✅ Cleanup empty rooms to prevent memory buildup
-    if (room.clients.size === 0) {
-      rooms.delete(roomId);
-    }
+    // no immediate deletion; cleanup handled by periodic sweeper
   });
 });
+
+// ---- Silent room cleanup: delete empty, inactive rooms after 30 minutes ----
+const ROOM_TTL_MS = 30 * 60_000;      // 30 minutes
+const SWEEP_INTERVAL_MS = 5 * 60_000; // sweep every 5 minutes
+
+setInterval(() => {
+  const nowMs = Date.now();
+  for (const [roomId, room] of rooms.entries()) {
+    if (room.clients.size === 0 && nowMs - room.state.updatedAt > ROOM_TTL_MS) {
+      rooms.delete(roomId);
+      // silent: no console.log
+    }
+  }
+}, SWEEP_INTERVAL_MS);
 
 const PORT = process.env.PORT || 3000;
 server.listen(PORT, () => {
