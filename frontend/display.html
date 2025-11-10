@@ -14,6 +14,9 @@
     <!-- Initial value matches locked duration (3:00) and default phase is GREEN -->
     <div id="count" class="count phase-green" aria-live="polite">03:00</div>
     <div id="subline" class="subline"></div>
+
+    <!-- New: zero-time message placeholder (shown when timer hits 0) -->
+    <p id="expiredMsg" class="expired-msg" aria-live="polite" hidden></p>
   </main>
 
   <!-- Relative module path -->
@@ -26,4 +29,3 @@
   </noscript>
 </body>
 </html>
-

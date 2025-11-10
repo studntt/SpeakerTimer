@@ -8,6 +8,7 @@ let els = {
   statusMsg: null,
   subline: null,
   stage: null,
+  expiredMsg: null, // NEW
 };
 
 // Local view state (render-only). We no longer use t0/elapsed for math.
@@ -256,6 +257,21 @@ function tick() {
     alarm.tryPlayOnce();
   }
 
+  // Expired message visibility
+  if (els.expiredMsg) {
+    const shouldShow =
+      rem === 0 &&
+      (state.status === "running" || state.status === "paused" || state.status === "finished") &&
+      alarm.hadPositive; // only after a real run
+
+    if (shouldShow) {
+      els.expiredMsg.textContent = "Your time has expired!!!";
+      els.expiredMsg.hidden = false;
+    } else {
+      els.expiredMsg.hidden = true;
+    }
+  }
+
   applyPhase(computePhase(rem));
   if (els.count) {
     // Floor to seconds for stable, identical display across clients.
@@ -345,11 +361,13 @@ function connect(room) {
       flash.resetFlags();
       alarm.stop();
       alarm.reset();
+      if (els.expiredMsg) els.expiredMsg.hidden = true; // also hide note on reset
     }
     if (prevStatus !== "idle" && state.status === "idle") {
       flash.resetFlags();
       alarm.stop();
       alarm.reset();
+      if (els.expiredMsg) els.expiredMsg.hidden = true;
     }
 
     // Hide badge if we got a good snapshot
@@ -381,6 +399,7 @@ function bindDom() {
   els.statusMsg = document.getElementById("statusMsg");
   els.subline = document.getElementById("subline");
   els.stage = document.getElementById("stage");
+  els.expiredMsg = document.getElementById("expiredMsg"); // NEW
 
   if (!els.count) console.warn('[display] Missing element: #count (required).');
   if (!els.stage) console.warn('[display] Missing element: #stage (fullscreen).');
