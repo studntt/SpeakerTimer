@@ -1,4 +1,4 @@
-// display.js (authoritative-deadline client; fixed thresholds; stable flashing + end alarm w/ reset-stop)
+// display.js (authoritative-deadline client; fixed thresholds; stable flashing + end alarm w/ reset-stop + fullscreen-safe overlay)
 
 const qs = new URLSearchParams(location.search);
 
@@ -37,7 +37,7 @@ let syncedReceivedAt = performance.now();
 // Track last applied phase so we don't restart CSS animations every frame
 let lastPhase = null; // "green" | "yellow" | "red" | null
 
-// ---------- Flash overlay (3-pulse, full-screen) ----------
+// ---------- Flash overlay (3-pulse, fullscreen-safe inside #stage) ----------
 const flash = {
   overlay: null,
   styleEl: null,
@@ -45,6 +45,7 @@ const flash = {
   didRed: false,
   ensure() {
     if (this.overlay) return;
+
     const prefersReduce = matchMedia("(prefers-reduced-motion: reduce)").matches;
     const dur = prefersReduce ? 700 : 500;        // per-iteration ms
     const iters = prefersReduce ? 1 : 3;          // pulses
@@ -55,8 +56,9 @@ const flash = {
         0%, 100% { opacity: 0; }
         50%     { opacity: 0.9; }
       }
+      /* Mount INSIDE #stage so it renders in fullscreen */
       .st-flash-overlay {
-        position: fixed; inset: 0; pointer-events: none;
+        position: absolute; inset: 0; pointer-events: none;
         z-index: 2147483646; opacity: 0; display: none;
         mix-blend-mode: normal;
       }
@@ -73,9 +75,11 @@ const flash = {
     this.styleEl.textContent = css;
     document.head.appendChild(this.styleEl);
 
+    // Prefer attaching to #stage so it survives Fullscreen API subtree rules
+    const parent = els.stage || document.body;
     this.overlay = document.createElement("div");
     this.overlay.className = "st-flash-overlay";
-    document.body.appendChild(this.overlay);
+    parent.appendChild(this.overlay);
 
     this._totalMs = total;
   },
@@ -414,7 +418,7 @@ function bindDom() {
   }
 
   bindDom();
-  flash.ensure();      // prepare overlay/css once
+  flash.ensure();      // prepare overlay/css once (now mounted inside #stage)
   alarm.ensureAudio(); // prepare audio
 
   // Safe first paint before first snapshot arrives
