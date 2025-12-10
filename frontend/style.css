@@ -49,7 +49,11 @@
   50%{ opacity: 1; } 
   100%{ opacity: .9; } 
 }
-.pulse{ animation: pulse-soft 1s ease-in-out infinite; }
+
+/* Disable count pulsing */
+.pulse{
+  animation: none;
+}
 
 /* ===== Screen flash overlay (3 pulses at yellow/red) ===== */
 @keyframes st-flash {

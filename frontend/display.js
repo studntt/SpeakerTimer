@@ -1,4 +1,4 @@
-// display.js (authoritative-deadline client; fixed thresholds; stable flashing + end alarm w/ reset-stop + fullscreen-safe overlay + 2.5s alarm limit)
+// display.js (authoritative-deadline client; fixed thresholds; NO flashing; end alarm w/ reset-stop + fullscreen-safe overlay + 2.5s alarm limit)
 
 const qs = new URLSearchParams(location.search);
 
@@ -27,7 +27,7 @@ let syncedBaseRemainingMs = state.remainingMs;
 let syncedReceivedAt = performance.now();
 let lastPhase = null;
 
-// ---------- Flash overlay ----------
+// ---------- Flash overlay (kept but effectively unused) ----------
 const flash = {
   overlay: null,
   styleEl: null,
@@ -56,18 +56,9 @@ const flash = {
     parent.appendChild(this.overlay);
     this._totalMs = total;
   },
-  trigger(color) {
-    this.ensure();
-    const o = this.overlay;
-    if (!o) return;
-    o.classList.remove("st-flash-yellow", "st-flash-red");
-    o.style.display = "block";
-    o.offsetHeight;
-    o.classList.add(color === "red" ? "st-flash-red" : "st-flash-yellow");
-    setTimeout(() => {
-      o.classList.remove("st-flash-yellow", "st-flash-red");
-      o.style.display = "none";
-    }, this._totalMs);
+  // Disable overlay flashes entirely
+  trigger(_color) {
+    return;
   },
   resetFlags() {
     this.didYellow = false;
@@ -141,10 +132,12 @@ const alarm = {
 // ---------- Utils ----------
 function fmt(ms) {
   ms = Math.max(0, Math.abs(ms));
-  const s = Math.floor(ms / 1000);
-  const m = Math.floor(s / 60);
-  const r = s % 60;
-  return `${String(m).padStart(2, "0")}:${String(r).padStart(2, "0")}`;
+  const totalSeconds = Math.floor(ms / 1000);
+  const m = Math.floor(totalSeconds / 60);
+  const r = totalSeconds % 60;
+  const mm = m >= 10 ? String(m).padStart(2, "0") : String(m);
+  const rr = String(r).padStart(2, "0");
+  return `${mm}:${rr}`;
 }
 function liveRemainingMs() {
   const nowMono = performance.now();
@@ -174,20 +167,18 @@ function applyPhase(phase) {
   if (!els.count) return;
   if (phase === lastPhase) return;
   lastPhase = phase;
+
+  // Remove pulse class so the timer text no longer flashes
   els.count.classList.remove("phase-green", "phase-yellow", "phase-red", "overtime", "pulse");
-  if (phase === "green") els.count.classList.add("phase-green");
-  else if (phase === "yellow") {
-    els.count.classList.add("phase-yellow", "pulse");
-    if (!flash.didYellow) {
-      flash.didYellow = true;
-      flash.trigger("yellow");
-    }
+
+  if (phase === "green") {
+    els.count.classList.add("phase-green");
+  } else if (phase === "yellow") {
+    els.count.classList.add("phase-yellow");
+    // no flash.trigger and no pulse
   } else if (phase === "red") {
-    els.count.classList.add("phase-red", "pulse");
-    if (!flash.didRed) {
-      flash.didRed = true;
-      flash.trigger("red");
-    }
+    els.count.classList.add("phase-red");
+    // no flash.trigger and no pulse
   }
 }
 function renderSubline() {
