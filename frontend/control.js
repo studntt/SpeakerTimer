@@ -49,10 +49,12 @@ function randomRoom() {
 }
 function fmt(ms) {
   ms = Math.max(0, Math.abs(ms));
-  const s = Math.floor(ms / 1000),
-    m = Math.floor(s / 60),
-    r = s % 60;
-  return String(m).padStart(2, "0") + ":" + String(r).padStart(2, "0");
+  const totalSeconds = Math.floor(ms / 1000);
+  const m = Math.floor(totalSeconds / 60);
+  const r = totalSeconds % 60;
+  const mm = m >= 10 ? String(m).padStart(2, "0") : String(m);
+  const rr = String(r).padStart(2, "0");
+  return `${mm}:${rr}`;
 }
 function displayUrlFor(room) {
   const u = new URL(location.origin + "/display");
