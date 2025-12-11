@@ -36,12 +36,15 @@ let state = {
   deadlineMs: null,
   remainingMs: DEFAULT_DURATION_MS,
   serverNow: Date.now(),
+  yellowAtMs: undefined,
+  redAtMs: undefined,
 };
 
 let syncedBaseRemainingMs = state.remainingMs;
 let syncedReceivedAt = performance.now();
 let lastInputEcho = "";
 let pushedOnce = false;
+let lastPhase = null; // track control preview phase
 
 // ---------- Utils ----------
 function randomRoom() {
@@ -68,6 +71,33 @@ function liveRemainingMs() {
     return Math.max(0, syncedBaseRemainingMs - dt);
   }
   return Math.max(0, syncedBaseRemainingMs);
+}
+
+// mirror display.js phase logic
+function computePhase(remMs) {
+  const yellowAt = typeof state.yellowAtMs === "number" ? state.yellowAtMs : 60_000;
+  const redAt = typeof state.redAtMs === "number" ? state.redAtMs : 30_000;
+  if (remMs <= 0) return "red";
+  if (remMs <= redAt) return "red";
+  if (remMs <= yellowAt) return "yellow";
+  return "green";
+}
+
+function applyPhase(phase) {
+  if (!preview) return;
+  if (phase === lastPhase) return;
+  lastPhase = phase;
+
+  // same class set the display uses
+  preview.classList.remove("phase-green", "phase-yellow", "phase-red", "overtime", "pulse");
+
+  if (phase === "green") {
+    preview.classList.add("phase-green");
+  } else if (phase === "yellow") {
+    preview.classList.add("phase-yellow");
+  } else if (phase === "red") {
+    preview.classList.add("phase-red");
+  }
 }
 
 // ---------- UI ----------
@@ -112,6 +142,7 @@ function updateUI() {
   if (preview) {
     const floored = Math.floor(rem / 1000) * 1000;
     preview.textContent = fmt(floored);
+    applyPhase(computePhase(floored)); // keep control preview in sync with display colors
   }
   setStatusPill(state.status);
   setButtonsByStatus(state.status);
@@ -149,6 +180,10 @@ function connect(room) {
     state.status = payload.status ?? state.status;
     state.durationMs = payload.durationMs ?? state.durationMs;
     state.serverNow = typeof payload.serverNow === "number" ? payload.serverNow : Date.now();
+    state.yellowAtMs =
+      typeof payload.yellowAtMs === "number" ? payload.yellowAtMs : state.yellowAtMs;
+    state.redAtMs =
+      typeof payload.redAtMs === "number" ? payload.redAtMs : state.redAtMs;
 
     const nowMono = performance.now();
     if (state.status === "running" && typeof payload.deadlineMs === "number") {
@@ -164,6 +199,8 @@ function connect(room) {
       state.deadlineMs = null;
       state.remainingMs = rem;
     }
+
+    lastPhase = null; // allow phase to recompute after snapshot
     updateUI();
   };
 

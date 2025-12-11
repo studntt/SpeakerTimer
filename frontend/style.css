@@ -1,4 +1,4 @@
-:root{
+:root{ 
   --bg:#000; --fg:#00ff62; --muted:#9ca3af;
   --green:#22c55e; --yellow:#facc15; --red:#ef4444;
   --card:#0f0f10; --card-edge:#1a1a1c; --card-glow:rgba(255,255,255,.04);
@@ -9,10 +9,10 @@
   --light-green:#34d399;
 }
 
-/* ===================== DISPLAY (unchanged) ===================== */
+/* ===================== DISPLAY (font matched to control) ===================== */
 .display-body{
   margin:0; background:var(--bg); color:var(--fg);
-  font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+  font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
   font-variant-numeric: tabular-nums;
 }
 
@@ -30,6 +30,7 @@
   grid-row:3;
   font-size: clamp(8rem, 18vw, 40rem);
   line-height:1; text-align:center; letter-spacing:0.02em;
+  font-weight:800; /* match control preview weight */
   transition: text-shadow .2s ease, color .2s ease, opacity .2s ease;
 }
 
@@ -234,6 +235,21 @@ button.primary:hover{ background:#29d66c; border-color:#29d66c; }
   color: #fafafa;
   margin: .6rem 0;
 }
+
+/* Make control preview obey phase colors (override .time-big color) */
+.time-big.phase-green{
+  color: var(--fg);
+  text-shadow: none;
+}
+.time-big.phase-yellow{
+  color: var(--yellow);
+  text-shadow: 0 0 .5rem rgba(250, 204, 21, .25);
+}
+.time-big.phase-red{
+  color: var(--red);
+  text-shadow: 0 0 .6rem rgba(239, 68, 68, .35);
+}
+
 /* Progress track removed visually */
 .timer-card .progress{ display:none !important; }
 .timer-card .phase{ display:none; } /* reserved hook */
