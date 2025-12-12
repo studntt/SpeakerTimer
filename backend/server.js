@@ -149,7 +149,10 @@ wss.on("connection", (ws, req) => {
 
     switch (type) {
       case "start": {
-        const durationMs = Math.max(1000, Number(payload?.durationMs ?? s.durationMs));
+        const durationMs = Math.max(
+          1000,
+          Number(payload?.durationMs ?? s.durationMs)
+        );
         s.status = "running";
         s.durationMs = durationMs;
         s.remainingMs = durationMs;
@@ -190,7 +193,10 @@ wss.on("connection", (ws, req) => {
       }
 
       case "setDuration": {
-        const newDur = Math.max(1000, Number(payload?.durationMs ?? s.durationMs));
+        const newDur = Math.max(
+          1000,
+          Number(payload?.durationMs ?? s.durationMs)
+        );
         const currentRem = Math.max(0, remainingFromAuthoritative(s, n));
         s.durationMs = newDur;
 
@@ -207,7 +213,7 @@ wss.on("connection", (ws, req) => {
         break;
       }
 
-      // ✅ UPDATED: allow remainingMs to exceed durationMs by expanding duration
+      // allow remainingMs to exceed durationMs by expanding duration
       case "adjustTime": {
         const delta = Number(payload?.deltaMs ?? 0);
         if (s.status === "running" && typeof s.deadlineMs === "number") {
@@ -221,7 +227,6 @@ wss.on("connection", (ws, req) => {
         } else {
           let newRem = s.remainingMs + delta;
           if (newRem < 0) newRem = 0;
-          // expand duration if new remaining time exceeds it
           if (newRem > s.durationMs) s.durationMs = newRem;
           s.remainingMs = newRem;
           s.updatedAt = n;
@@ -269,7 +274,8 @@ wss.on("connection", (ws, req) => {
 });
 
 // ---- Cleanup inactive rooms ----
-const ROOM_TTL_MS = 30 * 60_000;
+// Rooms are kept for 4 hours after last update if no clients are connected.
+const ROOM_TTL_MS = 4 * 60 * 60_000; // 4 hours
 const SWEEP_INTERVAL_MS = 5 * 60_000;
 
 setInterval(() => {

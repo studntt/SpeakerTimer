@@ -225,10 +225,18 @@ function resetToDefault() {
 }
 
 // ---------- Bindings ----------
-document.getElementById("minus30")?.addEventListener("click", () => send("adjustTime", { deltaMs: -30_000 }));
-document.getElementById("plus30")?.addEventListener("click", () => send("adjustTime", { deltaMs: 30_000 }));
-document.getElementById("minus10")?.addEventListener("click", () => send("adjustTime", { deltaMs: -10_000 }));
-document.getElementById("plus10")?.addEventListener("click", () => send("adjustTime", { deltaMs: 10_000 }));
+document.getElementById("minus30")?.addEventListener("click", () =>
+  send("adjustTime", { deltaMs: -30_000 })
+);
+document.getElementById("plus30")?.addEventListener("click", () =>
+  send("adjustTime", { deltaMs: 30_000 })
+);
+document.getElementById("minus10")?.addEventListener("click", () =>
+  send("adjustTime", { deltaMs: -10_000 })
+);
+document.getElementById("plus10")?.addEventListener("click", () =>
+  send("adjustTime", { deltaMs: 10_000 })
+);
 
 Object.keys(presets).forEach((id) => {
   const el = document.getElementById(id);
@@ -239,14 +247,34 @@ Object.keys(presets).forEach((id) => {
   }
 });
 
-// ✅ Cleaned up start/resume/reset flow
+// ✅ Start / resume / restart-from-zero flow
 startBtn?.addEventListener("click", () => {
+  const rem = liveRemainingMs();
+
+  // If we're effectively at 0, always treat Start as "new 3:00 round"
+  if (rem <= 1000) {
+    syncedBaseRemainingMs = DEFAULT_DURATION_MS;
+    syncedReceivedAt = performance.now();
+    state.remainingMs = DEFAULT_DURATION_MS;
+    state.durationMs = DEFAULT_DURATION_MS;
+
+    setDuration(DEFAULT_DURATION_MS);
+    send("start", { durationMs: DEFAULT_DURATION_MS });
+    return;
+  }
+
+  // Normal resume from pause
   if (state.status === "paused") {
     resume();
-  } else if (state.status === "idle" || state.status === "finished") {
+    return;
+  }
+
+  // Starting from a fresh / idle state with remaining time > 0
+  if (state.status === "idle" || state.status === "finished") {
     start();
   }
 });
+
 pauseBtn?.addEventListener("click", () => pause());
 resetBtn?.addEventListener("click", () => resetToDefault());
 
@@ -316,7 +344,9 @@ document.addEventListener("click", (e) => {
   const inside = roomPanel.contains(e.target) || panelToggle.contains(e.target);
   if (!inside) closePanel();
 });
-document.addEventListener("keydown", (e) => { if (e.key === "Escape" && isPanelOpen()) closePanel(); });
+document.addEventListener("keydown", (e) => {
+  if (e.key === "Escape" && isPanelOpen()) closePanel();
+});
 
 // Loop
 function tick() {
@@ -363,7 +393,7 @@ function openHelp() {
   modalKeyHandler = (e) => {
     if (e.key === "Escape") { e.preventDefault(); closeHelp(); }
     if ((e.key === "h" || e.key === "H") && hArm) {
-      e.preventDefault(); hArm = false; closeHelp(); setTimeout(()=>hArm=true,150);
+      e.preventDefault(); hArm = false; closeHelp(); setTimeout(() => (hArm = true), 150);
     }
   };
   window.addEventListener("keydown", modalKeyHandler);
@@ -395,7 +425,10 @@ helpBackdrop?.addEventListener("click", closeHelp);
   let hArm = true;
   window.addEventListener("keydown", (e) => {
     if ((e.key === "h" || e.key === "H") && helpModal?.hasAttribute("hidden") && hArm) {
-      e.preventDefault(); hArm = false; openHelp(); setTimeout(()=>hArm=true,150);
+      e.preventDefault();
+      hArm = false;
+      openHelp();
+      setTimeout(() => (hArm = true), 150);
     }
   });
 })();
@@ -411,7 +444,10 @@ helpBackdrop?.addEventListener("click", closeHelp);
   syncedReceivedAt = performance.now();
 
   if (roomPanel && panelToggle) {
-    const saved = (() => { try { return localStorage.getItem(PANEL_LS_KEY); } catch { return null; } })();
+    const saved = (() => {
+      try { return localStorage.getItem(PANEL_LS_KEY); }
+      catch { return null; }
+    })();
     saved === "1" ? openPanel() : closePanel();
   }
 
