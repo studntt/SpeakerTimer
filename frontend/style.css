@@ -1,4 +1,9 @@
-:root{ 
+/* style.css */
+
+/* ===== Premium timer typography (Inter) ===== */
+@import url("https://fonts.googleapis.com/css2?family=Inter:wght@500;600;700;800&display=swap");
+
+:root{
   --bg:#000; --fg:#00ff62; --muted:#9ca3af;
   --green:#22c55e; --yellow:#facc15; --red:#ef4444;
   --card:#0f0f10; --card-edge:#1a1a1c; --card-glow:rgba(255,255,255,.04);
@@ -7,13 +12,19 @@
   --dark-green:#14532d;
   --dark-green-2:#166534;
   --light-green:#34d399;
+
+  /* unified app font */
+  --font-sans: "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
 }
 
 /* ===================== DISPLAY (font matched to control) ===================== */
 .display-body{
   margin:0; background:var(--bg); color:var(--fg);
-  font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  font-family: var(--font-sans);
   font-variant-numeric: tabular-nums;
+  text-rendering: geometricPrecision;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
 }
 
 .stage{
@@ -29,8 +40,15 @@
 .count{
   grid-row:3;
   font-size: clamp(8rem, 18vw, 40rem);
-  line-height:1; text-align:center; letter-spacing:0.02em;
-  font-weight:800; /* match control preview weight */
+  line-height:1;
+  text-align:center;
+
+  /* More “pro” */
+  letter-spacing: 0.01em;     /* was 0.02em */
+  font-weight: 700;           /* was 800 */
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: "tnum" 1, "ss01" 1, "cv10" 1; /* subtle Inter polish */
+
   transition: text-shadow .2s ease, color .2s ease, opacity .2s ease;
 }
 
@@ -45,10 +63,10 @@
 
 .overtime::before{ content:"+"; margin-right:.1em; }
 
-@keyframes pulse-soft { 
-  0%{ opacity: .9; } 
-  50%{ opacity: 1; } 
-  100%{ opacity: .9; } 
+@keyframes pulse-soft {
+  0%{ opacity: .9; }
+  50%{ opacity: 1; }
+  100%{ opacity: .9; }
 }
 
 /* Disable count pulsing */
@@ -91,8 +109,11 @@
   margin: 0;
   background: #0b0b0c;
   color: #f5f5f5;
-  font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  font-family: var(--font-sans);
   font-variant-numeric: tabular-nums;
+  text-rendering: geometricPrecision;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
   display: flex;
   justify-content: center;
   min-height: 100vh;
@@ -230,10 +251,13 @@ button.primary:hover{ background:#29d66c; border-color:#29d66c; }
 /* Timer preview */
 .time-big {
   font-size: clamp(3.2rem, 9vw, 6.2rem);
-  font-weight: 800;
+  font-weight: 700;           /* was 800 */
+  letter-spacing: 0.01em;     /* match display */
   text-align: center;
   color: #fafafa;
   margin: .6rem 0;
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: "tnum" 1, "ss01" 1, "cv10" 1;
 }
 
 /* Make control preview obey phase colors (override .time-big color) */

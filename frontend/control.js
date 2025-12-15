@@ -100,6 +100,30 @@ function applyPhase(phase) {
   }
 }
 
+/**
+ * Hotkey guard:
+ * Don't trigger global hotkeys while the user is typing in an input/textarea/select
+ * or any contenteditable element (prevents room code "H" conflict).
+ */
+function isTypingContext(e) {
+  // If user is holding a modifier, don’t hijack (keeps normal browser/app shortcuts)
+  if (e?.metaKey || e?.ctrlKey || e?.altKey) return true;
+
+  const el = document.activeElement;
+  if (!el) return false;
+
+  // Contenteditable or inside contenteditable
+  if (el.isContentEditable) return true;
+
+  const tag = (el.tagName || "").toLowerCase();
+  if (tag === "input" || tag === "textarea" || tag === "select") return true;
+
+  // Some UIs focus a child inside a contenteditable wrapper
+  if (el.closest && el.closest('[contenteditable="true"]')) return true;
+
+  return false;
+}
+
 // ---------- UI ----------
 function setStatusPill(status) {
   if (!statusEl) return;
@@ -392,8 +416,14 @@ function openHelp() {
   let hArm = true;
   modalKeyHandler = (e) => {
     if (e.key === "Escape") { e.preventDefault(); closeHelp(); }
+
+    // Inside modal we can safely capture H, but still ignore if user is typing in an input in the modal
     if ((e.key === "h" || e.key === "H") && hArm) {
-      e.preventDefault(); hArm = false; closeHelp(); setTimeout(() => (hArm = true), 150);
+      if (isTypingContext(e)) return;
+      e.preventDefault();
+      hArm = false;
+      closeHelp();
+      setTimeout(() => (hArm = true), 150);
     }
   };
   window.addEventListener("keydown", modalKeyHandler);
@@ -421,9 +451,12 @@ helpClose2?.addEventListener("click", closeHelp);
 helpBackdrop?.addEventListener("click", closeHelp);
 
 // Global H to open when closed (debounced)
+// ✅ FIX: do NOT fire while user is typing in an input (room code, etc.)
 (() => {
   let hArm = true;
   window.addEventListener("keydown", (e) => {
+    if (isTypingContext(e)) return;
+
     if ((e.key === "h" || e.key === "H") && helpModal?.hasAttribute("hidden") && hArm) {
       e.preventDefault();
       hArm = false;
