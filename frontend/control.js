@@ -486,3 +486,4 @@ helpBackdrop?.addEventListener("click", closeHelp);
 
   tick();
 })();
+

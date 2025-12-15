@@ -27,6 +27,28 @@ let syncedBaseRemainingMs = state.remainingMs;
 let syncedReceivedAt = performance.now();
 let lastPhase = null;
 
+/**
+ * Hotkey guard:
+ * Don't trigger global hotkeys while the user is typing in an input/textarea/select
+ * or any contenteditable element. (Display page usually has none, but keeps behavior safe.)
+ */
+function isTypingContext(e) {
+  // Don’t hijack modifier shortcuts
+  if (e?.metaKey || e?.ctrlKey || e?.altKey) return true;
+
+  const el = document.activeElement;
+  if (!el) return false;
+
+  if (el.isContentEditable) return true;
+
+  const tag = (el.tagName || "").toLowerCase();
+  if (tag === "input" || tag === "textarea" || tag === "select") return true;
+
+  if (el.closest && el.closest('[contenteditable="true"]')) return true;
+
+  return false;
+}
+
 // ---------- Flash overlay (kept but effectively unused) ----------
 const flash = {
   overlay: null,
@@ -356,7 +378,11 @@ function bindDom() {
       alarm.arm();
     });
   }
+
+  // ✅ Guard hotkeys so we don't hijack typing if inputs ever exist (or get added later)
   window.addEventListener("keydown", (e) => {
+    if (isTypingContext(e)) return;
+
     if (e.key?.toLowerCase() === "f") toggleFullscreen();
     alarm.arm();
   });
