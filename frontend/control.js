@@ -29,6 +29,14 @@ const presets = {
 };
 
 let ws;
+
+// Track the *currently intended* room + socket identity (prevents reconnect to old room)
+let currentRoom = "DEMO";
+let wsToken = 0; // increments each time we create a brand-new socket
+
+// Track rooms we've already "default-pushed" to avoid clobbering existing running rooms
+const initializedRooms = new Set();
+
 let state = {
   roomId: "DEMO",
   status: "idle",
@@ -174,22 +182,72 @@ function updateUI() {
 }
 
 // ---------- WebSocket ----------
-function connect(room) {
-  if (ws) ws.close();
-  setStatusPill("connecting");
-
+function wsUrlFor(room) {
   const url = new URL(location.origin.replace(/^http/, "ws") + "/ws");
   url.searchParams.set("room", room);
   url.searchParams.set("role", "control");
-  ws = new WebSocket(url);
+  return url.toString();
+}
+
+function resetLocalViewForRoom(room) {
+  // local-only reset to avoid mixing old room render state
+  state.roomId = room;
+  state.status = "idle";
+  state.durationMs = DEFAULT_DURATION_MS;
+  state.deadlineMs = null;
+  state.remainingMs = DEFAULT_DURATION_MS;
+  state.serverNow = Date.now();
+
+  syncedBaseRemainingMs = DEFAULT_DURATION_MS;
+  syncedReceivedAt = performance.now();
+  lastPhase = null;
+  updateUI();
+}
+
+function connect(room) {
+  room = (room || "DEMO").toUpperCase().slice(0, 8) || "DEMO";
+  currentRoom = room;
+
+  // Always update UI link + local render baseline immediately
+  updateDisplayLink(room);
+  resetLocalViewForRoom(room);
+
+  // If we already have an OPEN socket, do NOT create a second connection.
+  // Instead, switch rooms on the same socket (server now supports type:"join").
+  if (ws && ws.readyState === WebSocket.OPEN) {
+    setStatusPill("connecting");
+    try {
+      ws.send(JSON.stringify({ type: "join", payload: { roomId: room, role: "control" } }));
+      ws.send(JSON.stringify({ type: "requestSnapshot" }));
+    } catch {}
+    return;
+  }
+
+  // If there’s a socket that’s CONNECTING/CLOSING, close it and replace (guarded).
+  try { ws?.close(); } catch {}
+
+  setStatusPill("connecting");
+
+  const myToken = ++wsToken; // this socket's identity
+  ws = new WebSocket(wsUrlFor(room));
 
   ws.onopen = () => {
-    try { ws.send(JSON.stringify({ type: "requestSnapshot" })); } catch {}
+    // If this socket is stale (user already switched rooms), immediately join the current room.
+    if (myToken !== wsToken) return;
+    try {
+      ws.send(JSON.stringify({ type: "join", payload: { roomId: currentRoom, role: "control" } }));
+      ws.send(JSON.stringify({ type: "requestSnapshot" }));
+    } catch {}
+
+    // Keep your old behavior: push defaults once (but safer: only for brand new rooms we open from this control)
+    // NOTE: we do NOT blindly force duration for rooms that might already be running.
     if (!pushedOnce) {
       setTimeout(() => {
-        setDuration(DEFAULT_DURATION_MS);
+        // Only push if we're still on the same socket + room
+        if (myToken !== wsToken) return;
+        // We'll push default duration later on snapshot if the room is idle.
         pushedOnce = true;
-      }, 100);
+      }, 50);
     }
   };
 
@@ -201,6 +259,12 @@ function connect(room) {
     const { type, payload } = parsed || {};
     if (type !== "snapshot" || !payload) return;
 
+    // Ignore snapshots that are not for the room we currently intend to view
+    const snapRoom = (payload.roomId || "").toUpperCase();
+    if (snapRoom && snapRoom !== currentRoom) return;
+
+    // Commit state
+    state.roomId = snapRoom || currentRoom;
     state.status = payload.status ?? state.status;
     state.durationMs = payload.durationMs ?? state.durationMs;
     state.serverNow = typeof payload.serverNow === "number" ? payload.serverNow : Date.now();
@@ -224,13 +288,36 @@ function connect(room) {
       state.remainingMs = rem;
     }
 
+    // Safer default push: only once per room, only if room is idle (don’t clobber running/paused rooms)
+    if (!initializedRooms.has(state.roomId) && state.status === "idle") {
+      initializedRooms.add(state.roomId);
+      // Keep it snappy; don’t spam if socket isn’t open
+      setTimeout(() => {
+        if (ws?.readyState === WebSocket.OPEN && state.roomId === currentRoom && state.status === "idle") {
+          setDuration(DEFAULT_DURATION_MS);
+        }
+      }, 75);
+    }
+
     lastPhase = null; // allow phase to recompute after snapshot
     updateUI();
   };
 
   ws.onclose = () => {
+    // Critical fix: don’t auto-reconnect an old room after the user already switched.
+    // Only reconnect if this closed socket is still the active one AND we still want the same room.
+    const stillActiveSocket = (myToken === wsToken);
+    const intendedRoom = currentRoom;
+
     setStatusPill("connecting");
-    setTimeout(() => connect(room), 2500);
+
+    if (!stillActiveSocket) return;
+
+    setTimeout(() => {
+      // If user switched rooms since this scheduled reconnect, abort.
+      if (myToken !== wsToken) return;
+      connect(intendedRoom);
+    }, 2500);
   };
 }
 
@@ -327,8 +414,11 @@ joinBtn.onclick = () => {
   roomInput.value = room;
   history.replaceState(null, "", `?room=${room}`);
   updateDisplayLink(room);
+
+  // IMPORTANT: connect() now switches rooms on the same socket if possible,
+  // and prevents old-room reconnect loops.
   connect(room);
-  setTimeout(() => setDuration(DEFAULT_DURATION_MS), 50);
+
   updateUI();
 };
 
@@ -486,4 +576,3 @@ helpBackdrop?.addEventListener("click", closeHelp);
 
   tick();
 })();
-
