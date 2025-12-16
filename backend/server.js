@@ -38,7 +38,16 @@ const wss = new WebSocketServer({ server, path: "/ws" });
 const rooms = new Map();
 
 const now = () => Date.now();
-const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
+
+function normalizeRoomId(v) {
+  const id = (v || "").toString().toUpperCase().slice(0, 8);
+  return id || "DEMO";
+}
+
+function normalizeRole(v) {
+  const r = (v || "display").toString().toLowerCase();
+  return r === "control" ? "control" : "display";
+}
 
 function ensureRoom(roomId) {
   if (!rooms.has(roomId)) {
@@ -94,34 +103,62 @@ function finalizeIfElapsed(roomId) {
   }
 }
 
-function broadcast(roomId) {
+function sendSnapshot(ws, roomId) {
   const room = rooms.get(roomId);
   if (!room) return;
-  const s = room.state;
-  const payload = { ...s, serverNow: now() };
-  const msg = JSON.stringify({ type: "snapshot", payload });
-  room.clients.forEach((ws) => {
-    if (ws.readyState === ws.OPEN) ws.send(msg);
-  });
-}
-
-wss.on("connection", (ws, req) => {
-  const url = new URL(req.url, `http://${req.headers.host}`);
-  const roomId =
-    (url.searchParams.get("room") || "").toUpperCase().slice(0, 8) || "DEMO";
-  const role = (url.searchParams.get("role") || "display").toLowerCase();
-
-  const room = ensureRoom(roomId);
-  room.clients.add(ws);
-
   finalizeIfElapsed(roomId);
   syncLegacyFields(room.state);
+
   ws.send(
     JSON.stringify({
       type: "snapshot",
       payload: { ...room.state, serverNow: now() },
     })
   );
+}
+
+function broadcast(roomId) {
+  const room = rooms.get(roomId);
+  if (!room) return;
+  const s = room.state;
+  const payload = { ...s, serverNow: now() };
+  const msg = JSON.stringify({ type: "snapshot", payload });
+
+  room.clients.forEach((ws) => {
+    if (ws.readyState === ws.OPEN) ws.send(msg);
+  });
+}
+
+function detachFromRoom(ws) {
+  const prevRoomId = ws._roomId;
+  if (!prevRoomId) return;
+
+  const prevRoom = rooms.get(prevRoomId);
+  if (prevRoom) prevRoom.clients.delete(ws);
+
+  ws._roomId = null;
+}
+
+function attachToRoom(ws, roomId) {
+  const id = normalizeRoomId(roomId);
+  const room = ensureRoom(id);
+  room.clients.add(ws);
+  ws._roomId = id;
+  return id;
+}
+
+wss.on("connection", (ws, req) => {
+  const url = new URL(req.url, `http://${req.headers.host}`);
+
+  // Initial bind from URL
+  const initialRoomId = normalizeRoomId(url.searchParams.get("room"));
+  const initialRole = normalizeRole(url.searchParams.get("role"));
+
+  ws._role = initialRole;
+  attachToRoom(ws, initialRoomId);
+
+  // Send initial snapshot
+  sendSnapshot(ws, ws._roomId);
 
   ws.on("message", (data) => {
     let msg;
@@ -130,7 +167,44 @@ wss.on("connection", (ws, req) => {
     } catch {
       return;
     }
+
     const { type, payload } = msg || {};
+
+    // Allow dynamic room switching / leaving (fix for stale subscriptions)
+    if (type === "join") {
+      // join/switch rooms on the SAME socket
+      const nextRoomId = normalizeRoomId(payload?.roomId);
+      const nextRole = normalizeRole(payload?.role ?? ws._role);
+
+      // If role changes, apply it
+      ws._role = nextRole;
+
+      // Move socket between rooms
+      const prevRoomId = ws._roomId;
+      if (prevRoomId !== nextRoomId) {
+        detachFromRoom(ws);
+        attachToRoom(ws, nextRoomId);
+      }
+
+      // Immediately send snapshot for the new room
+      sendSnapshot(ws, ws._roomId);
+      return;
+    }
+
+    if (type === "leave") {
+      // Explicitly stop receiving updates from any room
+      detachFromRoom(ws);
+      return;
+    }
+
+    // From here on, all actions apply to the socket's CURRENT room
+    const roomId = ws._roomId;
+    if (!roomId) return;
+
+    const room = rooms.get(roomId);
+    if (!room) return;
+
+    const role = ws._role || "display";
 
     const mutating =
       type === "start" ||
@@ -257,6 +331,7 @@ wss.on("connection", (ws, req) => {
       }
 
       case "requestSnapshot": {
+        // no-op; we'll just broadcast below
         break;
       }
 
@@ -269,7 +344,7 @@ wss.on("connection", (ws, req) => {
   });
 
   ws.on("close", () => {
-    room.clients.delete(ws);
+    detachFromRoom(ws);
   });
 });
 
