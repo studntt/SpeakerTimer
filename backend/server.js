@@ -34,10 +34,20 @@ const wss = new WebSocketServer({ server, path: "/ws" });
  * - durationMs: configured duration (default 3:00, but can expand)
  * - deadlineMs: epoch ms when timer will hit 0 (authoritative when running)
  * - remainingMs: remaining time snapshot when paused/idle
+ *
+ * Snapshot contract additions (computed server-side):
+ * - serverNow: epoch ms
+ * - yellowAtMs / redAtMs: FIXED absolute thresholds (Option #1):
+ *     yellowAtMs = 60_000 (1:00)
+ *     redAtMs    = 30_000 (0:30)
  */
 const rooms = new Map();
 
 const now = () => Date.now();
+
+// ===== FIXED THRESHOLDS (Option #1) =====
+const FIXED_YELLOW_AT_MS = 60_000;
+const FIXED_RED_AT_MS = 30_000;
 
 function normalizeRoomId(v) {
   const id = (v || "").toString().toUpperCase().slice(0, 8);
@@ -58,9 +68,14 @@ function ensureRoom(roomId) {
         durationMs: 180_000,
         deadlineMs: null,
         remainingMs: 180_000,
-        t0: null,
+
+        // legacy/back-compat fields (kept stable + meaningful)
+        t0: null, // epoch ms start time when running, else null
         elapsedPausedMs: 0,
+
+        // kept for back-compat; NOT used for display thresholds anymore
         thresholds: { yellowFrac: 0.5, redFrac: 0.1 },
+
         updatedAt: now(),
       },
       clients: new Set(),
@@ -69,50 +84,75 @@ function ensureRoom(roomId) {
   return rooms.get(roomId);
 }
 
+function clampNonNeg(n) {
+  return Number.isFinite(n) ? Math.max(0, n) : 0;
+}
+
 function remainingFromAuthoritative(s, at = now()) {
   if (s.status === "running" && typeof s.deadlineMs === "number") {
-    return s.deadlineMs - at;
+    return clampNonNeg(s.deadlineMs - at);
   }
-  return s.remainingMs;
+  return clampNonNeg(s.remainingMs);
 }
 
-function syncLegacyFields(s) {
+function syncLegacyFields(s, at = now()) {
+  const rem = remainingFromAuthoritative(s, at);
+  s.elapsedPausedMs = clampNonNeg((Number(s.durationMs) || 0) - rem);
+
   if (s.status === "running" && typeof s.deadlineMs === "number") {
-    const rem = Math.max(0, s.deadlineMs - now());
-    s.elapsedPausedMs = Math.max(0, s.durationMs - rem);
-    s.t0 = now();
-    return;
+    // stable start time for this run
+    s.t0 = s.deadlineMs - (Number(s.durationMs) || 0);
+  } else {
+    s.t0 = null;
   }
-  const rem = Math.max(0, s.remainingMs);
-  s.elapsedPausedMs = Math.max(0, s.durationMs - rem);
-  s.t0 = null;
 }
 
-function finalizeIfElapsed(roomId) {
+/**
+ * #1 FIX (finalize immediately when elapsed):
+ * Flip a running room to finished as soon as its authoritative remaining time hits 0.
+ * Key effect: prevents "overtime drift" from stealing seconds when user presses +30 after 0:00.
+ */
+function finalizeIfElapsed(roomId, at = now()) {
   const room = rooms.get(roomId);
-  if (!room) return;
+  if (!room) return false;
   const s = room.state;
-  if (s.status !== "running") return;
+  if (s.status !== "running") return false;
 
-  if (remainingFromAuthoritative(s) <= 0) {
+  if (remainingFromAuthoritative(s, at) <= 0) {
     s.status = "finished";
     s.deadlineMs = null;
     s.remainingMs = 0;
-    s.updatedAt = now();
-    syncLegacyFields(s);
+    s.updatedAt = at;
+    syncLegacyFields(s, at);
+    return true;
   }
+  return false;
+}
+
+function makeSnapshotPayload(s) {
+  return {
+    ...s,
+
+    // FIXED thresholds (Option #1) — clients should key off these.
+    yellowAtMs: FIXED_YELLOW_AT_MS,
+    redAtMs: FIXED_RED_AT_MS,
+
+    // Always include server clock
+    serverNow: now(),
+  };
 }
 
 function sendSnapshot(ws, roomId) {
   const room = rooms.get(roomId);
   if (!room) return;
+
   finalizeIfElapsed(roomId);
   syncLegacyFields(room.state);
 
   ws.send(
     JSON.stringify({
       type: "snapshot",
-      payload: { ...room.state, serverNow: now() },
+      payload: makeSnapshotPayload(room.state),
     })
   );
 }
@@ -120,9 +160,14 @@ function sendSnapshot(ws, roomId) {
 function broadcast(roomId) {
   const room = rooms.get(roomId);
   if (!room) return;
-  const s = room.state;
-  const payload = { ...s, serverNow: now() };
-  const msg = JSON.stringify({ type: "snapshot", payload });
+
+  finalizeIfElapsed(roomId);
+  syncLegacyFields(room.state);
+
+  const msg = JSON.stringify({
+    type: "snapshot",
+    payload: makeSnapshotPayload(room.state),
+  });
 
   room.clients.forEach((ws) => {
     if (ws.readyState === ws.OPEN) ws.send(msg);
@@ -172,27 +217,22 @@ wss.on("connection", (ws, req) => {
 
     // Allow dynamic room switching / leaving (fix for stale subscriptions)
     if (type === "join") {
-      // join/switch rooms on the SAME socket
       const nextRoomId = normalizeRoomId(payload?.roomId);
       const nextRole = normalizeRole(payload?.role ?? ws._role);
 
-      // If role changes, apply it
       ws._role = nextRole;
 
-      // Move socket between rooms
       const prevRoomId = ws._roomId;
       if (prevRoomId !== nextRoomId) {
         detachFromRoom(ws);
         attachToRoom(ws, nextRoomId);
       }
 
-      // Immediately send snapshot for the new room
       sendSnapshot(ws, ws._roomId);
       return;
     }
 
     if (type === "leave") {
-      // Explicitly stop receiving updates from any room
       detachFromRoom(ws);
       return;
     }
@@ -218,8 +258,12 @@ wss.on("connection", (ws, req) => {
 
     if (mutating && role !== "control") return;
 
-    const s = room.state;
+    // IMPORTANT: finalize BEFORE applying any new command.
+    // Prevents overtime drift from affecting later operations like +30s.
     const n = now();
+    finalizeIfElapsed(roomId, n);
+
+    const s = room.state;
 
     switch (type) {
       case "start": {
@@ -232,91 +276,111 @@ wss.on("connection", (ws, req) => {
         s.remainingMs = durationMs;
         s.deadlineMs = n + durationMs;
         s.updatedAt = n;
-        syncLegacyFields(s);
+        syncLegacyFields(s, n);
         break;
       }
 
       case "pause": {
         if (s.status !== "running") break;
-        const rem = Math.max(0, remainingFromAuthoritative(s, n));
+        const rem = remainingFromAuthoritative(s, n);
         s.status = "paused";
         s.remainingMs = rem;
         s.deadlineMs = null;
         s.updatedAt = n;
-        syncLegacyFields(s);
+        syncLegacyFields(s, n);
         break;
       }
 
       case "resume": {
         if (s.status !== "paused") break;
-        const rem = Math.max(0, s.remainingMs);
+        const rem = clampNonNeg(s.remainingMs);
         s.status = "running";
         s.deadlineMs = n + rem;
         s.updatedAt = n;
-        syncLegacyFields(s);
+        syncLegacyFields(s, n);
         break;
       }
 
       case "reset": {
         s.status = "idle";
-        s.remainingMs = s.durationMs;
+        s.remainingMs = Math.max(0, Number(s.durationMs) || 0);
         s.deadlineMs = null;
         s.updatedAt = n;
-        syncLegacyFields(s);
+        syncLegacyFields(s, n);
         break;
       }
 
       case "setDuration": {
+        // preserve elapsed time when changing duration while running
         const newDur = Math.max(
           1000,
           Number(payload?.durationMs ?? s.durationMs)
         );
-        const currentRem = Math.max(0, remainingFromAuthoritative(s, n));
+
+        const oldDur = Math.max(1000, Number(s.durationMs) || 180_000);
+        const currentRem = remainingFromAuthoritative(s, n);
+        const elapsed = clampNonNeg(oldDur - currentRem);
+
         s.durationMs = newDur;
 
         if (s.status === "running") {
-          const consumed = Math.max(0, newDur - currentRem);
-          s.deadlineMs = n + (newDur - consumed);
-          s.remainingMs = newDur - consumed;
+          const newRem = clampNonNeg(newDur - elapsed);
+          s.remainingMs = newRem;
+          s.deadlineMs = n + newRem;
         } else {
-          s.remainingMs = Math.max(0, currentRem);
+          // If shrinking duration, clamp remaining to new duration
+          const clampedRem = Math.min(currentRem, newDur);
+          s.remainingMs = clampNonNeg(clampedRem);
           s.deadlineMs = null;
         }
+
         s.updatedAt = n;
-        syncLegacyFields(s);
+        syncLegacyFields(s, n);
         break;
       }
 
       // allow remainingMs to exceed durationMs by expanding duration
       case "adjustTime": {
         const delta = Number(payload?.deltaMs ?? 0);
+
+        // If we were running but already elapsed, finalizeIfElapsed() above flipped to finished,
+        // so we naturally take the non-running branch and add from 0 (no drift).
         if (s.status === "running" && typeof s.deadlineMs === "number") {
           const minDeadline = n + 1000;
           s.deadlineMs = Math.max(minDeadline, s.deadlineMs + delta);
-          const newRemaining = Math.max(0, s.deadlineMs - n);
+
+          const newRemaining = remainingFromAuthoritative(s, n);
           s.remainingMs = newRemaining;
+
           if (newRemaining > s.durationMs) s.durationMs = newRemaining;
+
           s.updatedAt = n;
-          syncLegacyFields(s);
+          syncLegacyFields(s, n);
         } else {
-          let newRem = s.remainingMs + delta;
-          if (newRem < 0) newRem = 0;
+          let newRem = clampNonNeg(s.remainingMs + delta);
           if (newRem > s.durationMs) s.durationMs = newRem;
           s.remainingMs = newRem;
           s.updatedAt = n;
           s.deadlineMs = null;
-          syncLegacyFields(s);
+          syncLegacyFields(s, n);
         }
         break;
       }
 
       case "setThresholds": {
-        let yf = Number(payload?.yellowFrac ?? s.thresholds.yellowFrac);
-        let rf = Number(payload?.redFrac ?? s.thresholds.redFrac);
-        yf = Math.min(1, Math.max(0, yf));
-        rf = Math.min(1, Math.max(0, rf));
-        if (rf > yf) rf = yf;
-        s.thresholds = { yellowFrac: yf, redFrac: rf };
+        // Option #1: thresholds are FIXED server-side (1:00 / 0:30).
+        // Keep the message type for backwards-compat, but do not change behavior.
+        // Still store payload if you want, but it won't affect snapshots/colors.
+        if (payload && typeof payload === "object") {
+          const yf = Number(payload?.yellowFrac);
+          const rf = Number(payload?.redFrac);
+          if (Number.isFinite(yf) || Number.isFinite(rf)) {
+            s.thresholds = {
+              yellowFrac: Number.isFinite(yf) ? yf : s.thresholds?.yellowFrac ?? 0.5,
+              redFrac: Number.isFinite(rf) ? rf : s.thresholds?.redFrac ?? 0.1,
+            };
+          }
+        }
         s.updatedAt = n;
         break;
       }
@@ -326,7 +390,7 @@ wss.on("connection", (ws, req) => {
         s.deadlineMs = null;
         s.remainingMs = 0;
         s.updatedAt = n;
-        syncLegacyFields(s);
+        syncLegacyFields(s, n);
         break;
       }
 
@@ -339,6 +403,7 @@ wss.on("connection", (ws, req) => {
         return;
     }
 
+    // One more finalize pass (covers edge cases like start with tiny duration)
     finalizeIfElapsed(roomId);
     broadcast(roomId);
   });
@@ -347,6 +412,22 @@ wss.on("connection", (ws, req) => {
     detachFromRoom(ws);
   });
 });
+
+// ---- Auto-finalize ticker (so rooms flip to "finished" even if nobody clicks anything) ----
+const FINALIZE_TICK_MS = 250;
+
+setInterval(() => {
+  const t = now();
+  for (const [roomId, room] of rooms.entries()) {
+    const s = room.state;
+    if (s.status === "running" && typeof s.deadlineMs === "number") {
+      if (finalizeIfElapsed(roomId, t)) {
+        // only broadcast when we actually transition to finished
+        broadcast(roomId);
+      }
+    }
+  }
+}, FINALIZE_TICK_MS);
 
 // ---- Cleanup inactive rooms ----
 // Rooms are kept for 4 hours after last update if no clients are connected.

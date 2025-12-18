@@ -34,6 +34,9 @@ let ws;
 let currentRoom = "DEMO";
 let wsToken = 0; // increments each time we create a brand-new socket
 
+// Reconnect guard (prevents stacking reconnect timers)
+let reconnectTimer = null;
+
 // Track rooms we've already "default-pushed" to avoid clobbering existing running rooms
 const initializedRooms = new Set();
 
@@ -99,13 +102,9 @@ function applyPhase(phase) {
   // same class set the display uses
   preview.classList.remove("phase-green", "phase-yellow", "phase-red", "overtime", "pulse");
 
-  if (phase === "green") {
-    preview.classList.add("phase-green");
-  } else if (phase === "yellow") {
-    preview.classList.add("phase-yellow");
-  } else if (phase === "red") {
-    preview.classList.add("phase-red");
-  }
+  if (phase === "green") preview.classList.add("phase-green");
+  else if (phase === "yellow") preview.classList.add("phase-yellow");
+  else if (phase === "red") preview.classList.add("phase-red");
 }
 
 /**
@@ -114,22 +113,26 @@ function applyPhase(phase) {
  * or any contenteditable element (prevents room code "H" conflict).
  */
 function isTypingContext(e) {
-  // If user is holding a modifier, don’t hijack (keeps normal browser/app shortcuts)
   if (e?.metaKey || e?.ctrlKey || e?.altKey) return true;
 
   const el = document.activeElement;
   if (!el) return false;
 
-  // Contenteditable or inside contenteditable
   if (el.isContentEditable) return true;
 
   const tag = (el.tagName || "").toLowerCase();
   if (tag === "input" || tag === "textarea" || tag === "select") return true;
 
-  // Some UIs focus a child inside a contenteditable wrapper
   if (el.closest && el.closest('[contenteditable="true"]')) return true;
 
   return false;
+}
+
+function clearReconnect() {
+  if (reconnectTimer) {
+    clearTimeout(reconnectTimer);
+    reconnectTimer = null;
+  }
 }
 
 // ---------- UI ----------
@@ -137,7 +140,7 @@ function setStatusPill(status) {
   if (!statusEl) return;
   statusEl.classList.remove("status-running", "status-paused", "status-finished");
   statusEl.classList.add("status-pill");
-  statusEl.textContent = status.toUpperCase();
+  statusEl.textContent = String(status || "").toUpperCase();
   if (status === "running") statusEl.classList.add("status-running");
   if (status === "paused") statusEl.classList.add("status-paused");
   if (status === "finished") statusEl.classList.add("status-finished");
@@ -174,7 +177,7 @@ function updateUI() {
   if (preview) {
     const floored = Math.floor(rem / 1000) * 1000;
     preview.textContent = fmt(floored);
-    applyPhase(computePhase(floored)); // keep control preview in sync with display colors
+    applyPhase(computePhase(floored));
   }
   setStatusPill(state.status);
   setButtonsByStatus(state.status);
@@ -190,13 +193,14 @@ function wsUrlFor(room) {
 }
 
 function resetLocalViewForRoom(room) {
-  // local-only reset to avoid mixing old room render state
   state.roomId = room;
   state.status = "idle";
   state.durationMs = DEFAULT_DURATION_MS;
   state.deadlineMs = null;
   state.remainingMs = DEFAULT_DURATION_MS;
   state.serverNow = Date.now();
+  state.yellowAtMs = undefined;
+  state.redAtMs = undefined;
 
   syncedBaseRemainingMs = DEFAULT_DURATION_MS;
   syncedReceivedAt = performance.now();
@@ -208,12 +212,14 @@ function connect(room) {
   room = (room || "DEMO").toUpperCase().slice(0, 8) || "DEMO";
   currentRoom = room;
 
+  clearReconnect();
+
   // Always update UI link + local render baseline immediately
   updateDisplayLink(room);
   resetLocalViewForRoom(room);
 
   // If we already have an OPEN socket, do NOT create a second connection.
-  // Instead, switch rooms on the same socket (server now supports type:"join").
+  // Instead, switch rooms on the same socket (server supports type:"join").
   if (ws && ws.readyState === WebSocket.OPEN) {
     setStatusPill("connecting");
     try {
@@ -223,7 +229,7 @@ function connect(room) {
     return;
   }
 
-  // If there’s a socket that’s CONNECTING/CLOSING, close it and replace (guarded).
+  // If there’s a socket that’s CONNECTING/CLOSING, close it and replace.
   try { ws?.close(); } catch {}
 
   setStatusPill("connecting");
@@ -232,20 +238,16 @@ function connect(room) {
   ws = new WebSocket(wsUrlFor(room));
 
   ws.onopen = () => {
-    // If this socket is stale (user already switched rooms), immediately join the current room.
     if (myToken !== wsToken) return;
+
     try {
       ws.send(JSON.stringify({ type: "join", payload: { roomId: currentRoom, role: "control" } }));
       ws.send(JSON.stringify({ type: "requestSnapshot" }));
     } catch {}
 
-    // Keep your old behavior: push defaults once (but safer: only for brand new rooms we open from this control)
-    // NOTE: we do NOT blindly force duration for rooms that might already be running.
     if (!pushedOnce) {
       setTimeout(() => {
-        // Only push if we're still on the same socket + room
         if (myToken !== wsToken) return;
-        // We'll push default duration later on snapshot if the room is idle.
         pushedOnce = true;
       }, 50);
     }
@@ -259,19 +261,17 @@ function connect(room) {
     const { type, payload } = parsed || {};
     if (type !== "snapshot" || !payload) return;
 
-    // Ignore snapshots that are not for the room we currently intend to view
     const snapRoom = (payload.roomId || "").toUpperCase();
     if (snapRoom && snapRoom !== currentRoom) return;
 
-    // Commit state
     state.roomId = snapRoom || currentRoom;
     state.status = payload.status ?? state.status;
     state.durationMs = payload.durationMs ?? state.durationMs;
     state.serverNow = typeof payload.serverNow === "number" ? payload.serverNow : Date.now();
-    state.yellowAtMs =
-      typeof payload.yellowAtMs === "number" ? payload.yellowAtMs : state.yellowAtMs;
-    state.redAtMs =
-      typeof payload.redAtMs === "number" ? payload.redAtMs : state.redAtMs;
+
+    // server now provides these; still tolerate missing
+    state.yellowAtMs = typeof payload.yellowAtMs === "number" ? payload.yellowAtMs : state.yellowAtMs;
+    state.redAtMs = typeof payload.redAtMs === "number" ? payload.redAtMs : state.redAtMs;
 
     const nowMono = performance.now();
     if (state.status === "running" && typeof payload.deadlineMs === "number") {
@@ -291,7 +291,6 @@ function connect(room) {
     // Safer default push: only once per room, only if room is idle (don’t clobber running/paused rooms)
     if (!initializedRooms.has(state.roomId) && state.status === "idle") {
       initializedRooms.add(state.roomId);
-      // Keep it snappy; don’t spam if socket isn’t open
       setTimeout(() => {
         if (ws?.readyState === WebSocket.OPEN && state.roomId === currentRoom && state.status === "idle") {
           setDuration(DEFAULT_DURATION_MS);
@@ -299,22 +298,20 @@ function connect(room) {
       }, 75);
     }
 
-    lastPhase = null; // allow phase to recompute after snapshot
+    lastPhase = null;
     updateUI();
   };
 
   ws.onclose = () => {
-    // Critical fix: don’t auto-reconnect an old room after the user already switched.
-    // Only reconnect if this closed socket is still the active one AND we still want the same room.
     const stillActiveSocket = (myToken === wsToken);
     const intendedRoom = currentRoom;
 
     setStatusPill("connecting");
-
     if (!stillActiveSocket) return;
 
-    setTimeout(() => {
-      // If user switched rooms since this scheduled reconnect, abort.
+    clearReconnect();
+    reconnectTimer = setTimeout(() => {
+      reconnectTimer = null;
       if (myToken !== wsToken) return;
       connect(intendedRoom);
     }, 2500);
@@ -327,11 +324,12 @@ function send(type, payload = {}) {
 
 // ---------- Commands ----------
 function setDuration(ms) { send("setDuration", { durationMs: ms }); }
-function start() { send("start", { durationMs: state.remainingMs }); }
+function start() { send("start", { durationMs: state.remainingMs ?? DEFAULT_DURATION_MS }); }
 function pause() { send("pause"); }
 function resume() { send("resume"); }
 function resetToDefault() {
-  send("setDuration", { durationMs: DEFAULT_DURATION_MS });
+  // FIX: previously sent the wrong payload shape to setDuration
+  setDuration(DEFAULT_DURATION_MS);
   send("reset");
 }
 
@@ -374,13 +372,11 @@ startBtn?.addEventListener("click", () => {
     return;
   }
 
-  // Normal resume from pause
   if (state.status === "paused") {
     resume();
     return;
   }
 
-  // Starting from a fresh / idle state with remaining time > 0
   if (state.status === "idle" || state.status === "finished") {
     start();
   }
@@ -415,10 +411,7 @@ joinBtn.onclick = () => {
   history.replaceState(null, "", `?room=${room}`);
   updateDisplayLink(room);
 
-  // IMPORTANT: connect() now switches rooms on the same socket if possible,
-  // and prevents old-room reconnect loops.
   connect(room);
-
   updateUI();
 };
 
@@ -489,7 +482,6 @@ function openHelp() {
   helpModal.hidden = false;
   document.body.classList.add("no-scroll");
 
-  // Focus trap inside modal
   const sel = 'button,[href],input,select,textarea,[tabindex]:not([tabindex="-1"])';
   const nodes = helpModal.querySelectorAll(sel);
   const first = nodes[0];
@@ -502,12 +494,10 @@ function openHelp() {
   };
   helpModal.addEventListener("keydown", trapFocusHandler);
 
-  // Modal-level keys: Esc closes; H toggles close (debounced)
   let hArm = true;
   modalKeyHandler = (e) => {
     if (e.key === "Escape") { e.preventDefault(); closeHelp(); }
 
-    // Inside modal we can safely capture H, but still ignore if user is typing in an input in the modal
     if ((e.key === "h" || e.key === "H") && hArm) {
       if (isTypingContext(e)) return;
       e.preventDefault();
@@ -541,7 +531,6 @@ helpClose2?.addEventListener("click", closeHelp);
 helpBackdrop?.addEventListener("click", closeHelp);
 
 // Global H to open when closed (debounced)
-// ✅ FIX: do NOT fire while user is typing in an input (room code, etc.)
 (() => {
   let hArm = true;
   window.addEventListener("keydown", (e) => {

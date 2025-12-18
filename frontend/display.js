@@ -28,12 +28,18 @@ let syncedReceivedAt = performance.now();
 let lastPhase = null;
 
 /**
- * Hotkey guard:
- * Don't trigger global hotkeys while the user is typing in an input/textarea/select
- * or any contenteditable element. (Display page usually has none, but keeps behavior safe.)
+ * Socket/reconnect guard:
+ * Ensure only ONE websocket + ONE reconnect timer exist at a time.
  */
+let wsRef = null;
+let reconnectTimer = null;
+let reconnectRoom = null;
+
+// Track expired banner visibility so alarm plays ONCE per "show" cycle
+let expiredShown = false;
+
+// ---------- Typing guard ----------
 function isTypingContext(e) {
-  // Don’t hijack modifier shortcuts
   if (e?.metaKey || e?.ctrlKey || e?.altKey) return true;
 
   const el = document.activeElement;
@@ -49,39 +55,12 @@ function isTypingContext(e) {
   return false;
 }
 
-// ---------- Flash overlay (kept but effectively unused) ----------
+// ---------- Flash overlay (disabled; no DOM/CSS injected) ----------
 const flash = {
-  overlay: null,
-  styleEl: null,
   didYellow: false,
   didRed: false,
-  ensure() {
-    if (this.overlay) return;
-    const prefersReduce = matchMedia("(prefers-reduced-motion: reduce)").matches;
-    const dur = prefersReduce ? 700 : 500;
-    const iters = prefersReduce ? 1 : 3;
-    const total = dur * iters + 100;
-    const css = `
-      @keyframes st-flash {
-        0%,100%{opacity:0;}50%{opacity:.9;}
-      }
-      .st-flash-overlay{position:absolute;inset:0;pointer-events:none;z-index:2147483646;opacity:0;display:none;mix-blend-mode:normal;}
-      .st-flash-yellow{background:#facc15;animation:st-flash ${dur}ms ease-in-out ${iters};}
-      .st-flash-red{background:#ef4444;animation:st-flash ${dur}ms ease-in-out ${iters};}
-    `;
-    this.styleEl = document.createElement("style");
-    this.styleEl.textContent = css;
-    document.head.appendChild(this.styleEl);
-    const parent = els.stage || document.body;
-    this.overlay = document.createElement("div");
-    this.overlay.className = "st-flash-overlay";
-    parent.appendChild(this.overlay);
-    this._totalMs = total;
-  },
-  // Disable overlay flashes entirely
-  trigger(_color) {
-    return;
-  },
+  ensure() {},
+  trigger(_color) {},
   resetFlags() {
     this.didYellow = false;
     this.didRed = false;
@@ -92,7 +71,6 @@ const flash = {
 const alarm = {
   audio: null,
   armed: false,
-  didPlay: false,
   hadPositive: false,
   ensureAudio() {
     if (this.audio) return;
@@ -111,30 +89,31 @@ const alarm = {
           this.audio.currentTime = 0;
           this.armed = true;
         }).catch(() => {});
-      } else this.armed = true;
+      } else {
+        this.armed = true;
+      }
     } catch {}
   },
-  tryPlayOnce() {
-    if (!this.armed || this.didPlay) return;
+  playLimited() {
+    // Plays every time the "expired" message appears (once per show cycle),
+    // but still requires a user gesture to arm audio.
+    if (!this.armed) return;
+
     this.ensureAudio();
     try {
+      // Restart from the top cleanly
+      this.stop();
       this.audio.currentTime = 0;
+
       const p = this.audio.play();
+      const stopAfter = () => {
+        setTimeout(() => this.stop(), 2500);
+      };
+
       if (p && typeof p.then === "function") {
-        p.then(() => {
-          this.didPlay = true;
-          // Limit playback to 2.5 seconds
-          setTimeout(() => {
-            this.audio.pause();
-            this.audio.currentTime = 0;
-          }, 2500);
-        }).catch(() => {});
+        p.then(stopAfter).catch(() => {});
       } else {
-        this.didPlay = true;
-        setTimeout(() => {
-          this.audio.pause();
-          this.audio.currentTime = 0;
-        }, 2500);
+        stopAfter();
       }
     } catch {}
   },
@@ -146,8 +125,8 @@ const alarm = {
     } catch {}
   },
   reset() {
-    this.didPlay = false;
     this.hadPositive = false;
+    // keep armed state; user gesture arms it
   },
 };
 
@@ -161,14 +140,24 @@ function fmt(ms) {
   const rr = String(r).padStart(2, "0");
   return `${mm}:${rr}`;
 }
+
 function liveRemainingMs() {
   const nowMono = performance.now();
   return state.status === "running"
     ? Math.max(0, syncedBaseRemainingMs - (nowMono - syncedReceivedAt))
     : Math.max(0, syncedBaseRemainingMs);
 }
+
 function ensureStatusMsg() {
+  // Prefer an existing DOM element if it appears later
+  const existing = document.getElementById("statusMsg");
+  if (existing && existing.nodeType === 1) {
+    els.statusMsg = existing;
+    return existing;
+  }
+
   if (els.statusMsg && els.statusMsg.nodeType === 1) return els.statusMsg;
+
   const fallback = document.createElement("div");
   fallback.id = "statusMsg";
   fallback.style.cssText =
@@ -177,6 +166,7 @@ function ensureStatusMsg() {
   els.statusMsg = fallback;
   return fallback;
 }
+
 function computePhase(remMs) {
   const yellowAt = typeof state.yellowAtMs === "number" ? state.yellowAtMs : 60_000;
   const redAt = typeof state.redAtMs === "number" ? state.redAtMs : 30_000;
@@ -185,68 +175,130 @@ function computePhase(remMs) {
   if (remMs <= yellowAt) return "yellow";
   return "green";
 }
+
 function applyPhase(phase) {
   if (!els.count) return;
   if (phase === lastPhase) return;
   lastPhase = phase;
 
-  // Remove pulse class so the timer text no longer flashes
   els.count.classList.remove("phase-green", "phase-yellow", "phase-red", "overtime", "pulse");
 
-  if (phase === "green") {
-    els.count.classList.add("phase-green");
-  } else if (phase === "yellow") {
-    els.count.classList.add("phase-yellow");
-    // no flash.trigger and no pulse
-  } else if (phase === "red") {
-    els.count.classList.add("phase-red");
-    // no flash.trigger and no pulse
-  }
+  if (phase === "green") els.count.classList.add("phase-green");
+  else if (phase === "yellow") els.count.classList.add("phase-yellow");
+  else if (phase === "red") els.count.classList.add("phase-red");
 }
+
 function renderSubline() {
   if (!els.subline) return;
   const name = state.metadata?.speakerName?.trim();
   const topic = state.metadata?.topic?.trim();
-  els.subline.textContent =
-    name || topic ? [name, topic].filter(Boolean).join(" · ") : "";
+  els.subline.textContent = name || topic ? [name, topic].filter(Boolean).join(" · ") : "";
   els.subline.style.display = els.subline.textContent ? "block" : "none";
+}
+
+function resetVisualAndAlarm() {
+  flash.resetFlags();
+  alarm.stop();
+  alarm.reset();
+  expiredShown = false;
+  if (els.expiredMsg) els.expiredMsg.hidden = true;
 }
 
 // ---------- Loop ----------
 function tick() {
   const rem = liveRemainingMs();
+
   if (state.status === "running" && rem > 0) alarm.hadPositive = true;
-  if (state.status === "running" && rem === 0 && alarm.hadPositive && !alarm.didPlay)
-    alarm.tryPlayOnce();
+
+  const showExpired =
+    rem === 0 &&
+    (state.status === "running" || state.status === "paused" || state.status === "finished");
+
+  // ✅ Play sound each time the expired message APPEARS (once per show cycle)
+  if (showExpired && !expiredShown) {
+    expiredShown = true;
+    alarm.playLimited();
+  }
+  if (!showExpired && expiredShown) {
+    expiredShown = false;
+  }
 
   if (els.expiredMsg) {
-    const show =
-      rem === 0 &&
-      (state.status === "running" ||
-        state.status === "paused" ||
-        state.status === "finished") &&
-      alarm.hadPositive;
-    els.expiredMsg.textContent = show ? "Your time has expired!!!" : "";
-    els.expiredMsg.hidden = !show;
+    els.expiredMsg.textContent = showExpired ? "Your time has expired!!!" : "";
+    els.expiredMsg.hidden = !showExpired;
   }
 
   applyPhase(computePhase(rem));
   if (els.count) els.count.textContent = fmt(Math.floor(rem / 1000) * 1000);
+
   requestAnimationFrame(tick);
 }
 
 // ---------- WebSocket ----------
+function wsUrlForRoom(room) {
+  return new URL(
+    location.origin.replace(/^http/, "ws") +
+      "/ws?room=" +
+      encodeURIComponent(room) +
+      "&role=display"
+  );
+}
+
+function clearReconnect() {
+  if (reconnectTimer) {
+    clearTimeout(reconnectTimer);
+    reconnectTimer = null;
+  }
+}
+
+function scheduleReconnect(room) {
+  clearReconnect();
+  reconnectRoom = room;
+  const badge = ensureStatusMsg();
+  badge.textContent = "Reconnecting…";
+  badge.style.display = "block";
+
+  reconnectTimer = setTimeout(() => {
+    reconnectTimer = null;
+    connect(reconnectRoom);
+  }, 2500);
+}
+
+function cleanupSocket() {
+  if (!wsRef) return;
+  try {
+    wsRef.onopen = null;
+    wsRef.onclose = null;
+    wsRef.onmessage = null;
+    wsRef.onerror = null;
+  } catch {}
+  try {
+    if (wsRef.readyState === WebSocket.OPEN || wsRef.readyState === WebSocket.CONNECTING) {
+      wsRef.close();
+    }
+  } catch {}
+  wsRef = null;
+}
+
 function connect(room) {
+  // Guard: if we already have a live/connecting socket for this room, don't stack another
+  if (wsRef && (wsRef.readyState === WebSocket.OPEN || wsRef.readyState === WebSocket.CONNECTING)) {
+    return;
+  }
+
+  clearReconnect();
+  cleanupSocket();
+
   let url;
   try {
-    url = new URL(location.origin.replace(/^http/, "ws") + "/ws");
+    url = wsUrlForRoom(room);
   } catch (e) {
     console.error("[display] Invalid WS URL:", e);
     return;
   }
-  url.searchParams.set("room", room);
-  url.searchParams.set("role", "display");
+
   const ws = new WebSocket(url);
+  wsRef = ws;
 
   ws.onopen = () => {
     connected = true;
@@ -257,10 +309,10 @@ function connect(room) {
 
   ws.onclose = () => {
     connected = false;
-    const badge = ensureStatusMsg();
-    badge.textContent = "Reconnecting…";
-    badge.style.display = "block";
-    setTimeout(() => connect(room), 2500);
+    // If we intentionally cleaned up, don't schedule.
+    if (wsRef !== ws) return;
+    wsRef = null;
+    scheduleReconnect(room);
   };
 
   ws.onmessage = (ev) => {
@@ -271,22 +323,22 @@ function connect(room) {
       console.warn("[display] Non-JSON message:", ev.data);
       return;
     }
+
     const { type, payload } = msg || {};
     if (type !== "snapshot" || !payload || typeof payload !== "object") return;
 
     const prevStatus = state.status;
+
     state.roomId = payload.roomId ?? state.roomId;
     state.status = payload.status ?? state.status;
-    state.durationMs =
-      typeof payload.durationMs === "number" ? payload.durationMs : state.durationMs;
+    state.durationMs = typeof payload.durationMs === "number" ? payload.durationMs : state.durationMs;
     state.metadata = payload.metadata ?? state.metadata;
-    state.yellowAtMs =
-      typeof payload.yellowAtMs === "number" ? payload.yellowAtMs : state.yellowAtMs;
-    state.redAtMs =
-      typeof payload.redAtMs === "number" ? payload.redAtMs : state.redAtMs;
 
-    const serverNow =
-      typeof payload.serverNow === "number" ? payload.serverNow : Date.now();
+    // Server now provides these; still tolerate missing
+    state.yellowAtMs = typeof payload.yellowAtMs === "number" ? payload.yellowAtMs : state.yellowAtMs;
+    state.redAtMs = typeof payload.redAtMs === "number" ? payload.redAtMs : state.redAtMs;
+
+    const serverNow = typeof payload.serverNow === "number" ? payload.serverNow : Date.now();
     const hasDeadline = typeof payload.deadlineMs === "number";
     const nowMono = performance.now();
 
@@ -297,32 +349,26 @@ function connect(room) {
       state.deadlineMs = payload.deadlineMs;
       state.remainingMs = undefined;
     } else {
-      const rem =
-        typeof payload.remainingMs === "number" ? payload.remainingMs : 0;
+      const rem = typeof payload.remainingMs === "number" ? payload.remainingMs : 0;
       syncedBaseRemainingMs = Math.max(0, rem);
       syncedReceivedAt = nowMono;
       state.deadlineMs = null;
       state.remainingMs = rem;
     }
 
-    if (
+    // Reset alarm/expired UI reliably when transitioning to idle
+    if (prevStatus !== "idle" && state.status === "idle") {
+      resetVisualAndAlarm();
+    } else if (
       state.status === "idle" &&
       typeof state.durationMs === "number" &&
       Math.abs(syncedBaseRemainingMs - state.durationMs) < 50
     ) {
-      flash.resetFlags();
-      alarm.stop();
-      alarm.reset();
-      if (els.expiredMsg) els.expiredMsg.hidden = true;
-    }
-    if (prevStatus !== "idle" && state.status === "idle") {
-      flash.resetFlags();
-      alarm.stop();
-      alarm.reset();
-      if (els.expiredMsg) els.expiredMsg.hidden = true;
+      resetVisualAndAlarm();
     }
 
-    if (!connected) {
+    // If connected but badge still showing for any reason, hide it
+    if (connected) {
       const badge = ensureStatusMsg();
       badge.textContent = "";
       badge.style.display = "none";
@@ -333,6 +379,8 @@ function connect(room) {
   };
 
   ws.onerror = (err) => {
+    connected = false;
+    // Don't spam; close will handle reconnect scheduling
     console.warn("[display] WebSocket error:", err?.message || err);
   };
 }
@@ -360,9 +408,11 @@ function bindDom() {
     document.addEventListener("DOMContentLoaded", init);
     return;
   }
+
   bindDom();
   flash.ensure();
   alarm.ensureAudio();
+
   applyPhase("green");
   if (els.count) els.count.textContent = fmt(state.durationMs);
   syncedBaseRemainingMs = state.durationMs;
@@ -379,7 +429,6 @@ function bindDom() {
     });
   }
 
-  // ✅ Guard hotkeys so we don't hijack typing if inputs ever exist (or get added later)
   window.addEventListener("keydown", (e) => {
     if (isTypingContext(e)) return;
 
