@@ -1,4 +1,4 @@
-// display.js (authoritative-deadline client; fixed thresholds; NO flashing; end alarm w/ reset-stop + fullscreen-safe overlay + 2.5s alarm limit)
+// display.js (authoritative-deadline client; fixed thresholds; digit-only subtle heartbeat flash; end alarm w/ reset-stop + fullscreen-safe overlay + 2.5s alarm limit)
 
 const qs = new URLSearchParams(location.search);
 
@@ -55,15 +55,49 @@ function isTypingContext(e) {
   return false;
 }
 
-// ---------- Flash overlay (disabled; no DOM/CSS injected) ----------
+// ---------- Digit-only subtle heartbeat (one-shot on phase entry) ----------
 const flash = {
   didYellow: false,
   didRed: false,
-  ensure() {},
-  trigger(_color) {},
+  _killTimer: null,
+
+  trigger() {
+    if (!els.count) return;
+
+    // clear any pending cleanup so rapid re-triggers don't fight each other
+    if (this._killTimer) {
+      clearTimeout(this._killTimer);
+      this._killTimer = null;
+    }
+
+    // remove + force reflow + add => reliably restarts CSS animation
+    els.count.classList.remove("st-heartbeat");
+    // eslint-disable-next-line no-unused-expressions
+    void els.count.offsetWidth;
+    els.count.classList.add("st-heartbeat");
+
+    // auto-clean so future triggers are clean even if animationend doesn't fire
+    const cleanup = () => {
+      if (!els.count) return;
+      els.count.classList.remove("st-heartbeat");
+    };
+
+    // Use once listener, but also a hard fallback for tab switches / dropped events
+    els.count.addEventListener("animationend", cleanup, { once: true });
+    this._killTimer = setTimeout(() => {
+      this._killTimer = null;
+      cleanup();
+    }, 1500);
+  },
+
   resetFlags() {
     this.didYellow = false;
     this.didRed = false;
+    if (this._killTimer) {
+      clearTimeout(this._killTimer);
+      this._killTimer = null;
+    }
+    if (els.count) els.count.classList.remove("st-heartbeat");
   },
 };
 
@@ -179,6 +213,19 @@ function computePhase(remMs) {
 function applyPhase(phase) {
   if (!els.count) return;
   if (phase === lastPhase) return;
+
+  // Digit flash logic on phase entry (no overlay)
+  if (phase === "green") {
+    // allow re-flash if time is adjusted back above thresholds
+    flash.resetFlags();
+  } else if (phase === "yellow" && !flash.didYellow) {
+    flash.didYellow = true;
+    flash.trigger();
+  } else if (phase === "red" && !flash.didRed) {
+    flash.didRed = true;
+    flash.trigger();
+  }
+
   lastPhase = phase;
 
   els.count.classList.remove("phase-green", "phase-yellow", "phase-red", "overtime", "pulse");
@@ -356,15 +403,17 @@ function connect(room) {
       state.remainingMs = rem;
     }
 
-    // Reset alarm/expired UI reliably when transitioning to idle
+    // Reset alarm/expired UI + flash flags reliably when transitioning to idle
     if (prevStatus !== "idle" && state.status === "idle") {
       resetVisualAndAlarm();
+      lastPhase = null;
     } else if (
       state.status === "idle" &&
       typeof state.durationMs === "number" &&
       Math.abs(syncedBaseRemainingMs - state.durationMs) < 50
     ) {
       resetVisualAndAlarm();
+      lastPhase = null;
     }
 
     // If connected but badge still showing for any reason, hide it
@@ -375,7 +424,6 @@ function connect(room) {
     }
 
     renderSubline();
-    lastPhase = null;
   };
 
   ws.onerror = (err) => {
@@ -410,7 +458,6 @@ function bindDom() {
   }
 
   bindDom();
-  flash.ensure();
   alarm.ensureAudio();
 
   applyPhase("green");

@@ -49,7 +49,7 @@
   font-variant-numeric: tabular-nums;
   font-feature-settings: "tnum" 1, "ss01" 1, "cv10" 1; /* subtle Inter polish */
 
-  transition: text-shadow .2s ease, color .2s ease, opacity .2s ease;
+  transition: text-shadow .2s ease, color .2s ease, opacity .2s ease, transform .2s ease, filter .2s ease;
 }
 
 .subline{
@@ -74,33 +74,61 @@
   animation: none;
 }
 
-/* ===== Screen flash overlay (3 pulses at yellow/red) ===== */
-@keyframes st-flash {
-  0%, 100% { opacity: 0; }
-  50%      { opacity: .9; }
+/* ===== Digit-only heartbeat (LEVEL 2 — noticeably stronger, STILL projector-safe) =====
+   Dragged out longer (Option A): same punch, more time to notice.
+*/
+
+/* Two-beat, higher contrast, with “holds” so it doesn’t blink-and-you-miss-it */
+@keyframes st-count-heartbeat {
+  0%   { opacity: 1;   transform: scale(1);      filter: brightness(1); }
+
+  /* Beat 1 */
+  10%  { opacity: .62; transform: scale(1.028);  filter: brightness(1.32); }
+  20%  { opacity: .62; transform: scale(1.028);  filter: brightness(1.32); }
+  32%  { opacity: 1;   transform: scale(1);      filter: brightness(1); }
+
+  /* Beat 2 */
+  54%  { opacity: .70; transform: scale(1.020);  filter: brightness(1.22); }
+  66%  { opacity: .70; transform: scale(1.020);  filter: brightness(1.22); }
+  78%  { opacity: 1;   transform: scale(1);      filter: brightness(1); }
+
+  100% { opacity: 1;   transform: scale(1);      filter: brightness(1); }
 }
-.st-flash-overlay{
-  position: fixed;
-  inset: 0;
-  pointer-events: none;
-  z-index: 2147483646;
-  opacity: 0;
-  display: none;
-  mix-blend-mode: normal; /* keep digits readable */
+
+/* Flash class applied to #count */
+.count.st-heartbeat{
+  animation: st-count-heartbeat 1300ms cubic-bezier(.2,.9,.2,1) 1;
+  will-change: opacity, transform, filter;
+  transform-origin: center;
 }
-.st-flash-yellow{
-  background: var(--yellow);
-  animation: st-flash 1500ms ease-in-out 3;
+
+/* Stronger glow during the beat (phase-keyed) */
+.count.st-heartbeat.phase-yellow{
+  text-shadow:
+    0 0 1.1rem rgba(250, 204, 21, .55),
+    0 0 2.4rem rgba(250, 204, 21, .22);
 }
-.st-flash-red{
-  background: var(--red);
-  animation: st-flash 1500ms ease-in-out 3;
+.count.st-heartbeat.phase-red{
+  text-shadow:
+    0 0 1.25rem rgba(239, 68, 68, .60),
+    0 0 2.8rem rgba(239, 68, 68, .24);
 }
+
+/* Reduced motion: obvious brightness pulse (no scale), still long enough to notice */
 @media (prefers-reduced-motion: reduce){
-  .st-flash-yellow,
-  .st-flash-red{
-    animation-duration: 1500ms;
-    animation-iteration-count: 1; /* single soft fade for accessibility */
+  @keyframes st-count-heartbeat {
+    0%   { opacity: 1;   filter: brightness(1); }
+    20%  { opacity: .72; filter: brightness(1.18); }
+    34%  { opacity: .72; filter: brightness(1.18); }
+    46%  { opacity: 1;   filter: brightness(1); }
+
+    66%  { opacity: .78; filter: brightness(1.12); }
+    80%  { opacity: .78; filter: brightness(1.12); }
+    100% { opacity: 1;   filter: brightness(1); }
+  }
+  .count.st-heartbeat{
+    animation-duration: 1100ms;
+    animation-iteration-count: 1;
   }
 }
 

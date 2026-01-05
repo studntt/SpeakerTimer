@@ -17,12 +17,8 @@ app.use(express.static(FRONT, { extensions: ["html"] }));
 app.get("/", (_req, res) => res.redirect("/control"));
 
 // Convenience routes
-app.get("/control", (_req, res) =>
-  res.sendFile(path.join(FRONT, "control.html"))
-);
-app.get("/display", (_req, res) =>
-  res.sendFile(path.join(FRONT, "display.html"))
-);
+app.get("/control", (_req, res) => res.sendFile(path.join(FRONT, "control.html")));
+app.get("/display", (_req, res) => res.sendFile(path.join(FRONT, "display.html")));
 
 // HTTP + WS
 const server = http.createServer(app);
@@ -36,7 +32,7 @@ const wss = new WebSocketServer({ server, path: "/ws" });
  * - remainingMs: remaining time snapshot when paused/idle
  *
  * Snapshot contract additions (computed server-side):
- * - serverNow: epoch ms
+ * - serverNow: epoch ms (set right before send)
  * - yellowAtMs / redAtMs: FIXED absolute thresholds (Option #1):
  *     yellowAtMs = 60_000 (1:00)
  *     redAtMs    = 30_000 (0:30)
@@ -44,6 +40,9 @@ const wss = new WebSocketServer({ server, path: "/ws" });
 const rooms = new Map();
 
 const now = () => Date.now();
+
+// ws readyState constants (don’t rely on instance.OPEN)
+const WS_OPEN = 1;
 
 // ===== FIXED THRESHOLDS (Option #1) =====
 const FIXED_YELLOW_AT_MS = 60_000;
@@ -79,6 +78,9 @@ function ensureRoom(roomId) {
         updatedAt: now(),
       },
       clients: new Set(),
+      // cache last broadcast msg per tick to avoid rebuilding per-client
+      _lastMsg: null,
+      _lastMsgAt: 0,
     });
   }
   return rooms.get(roomId);
@@ -108,9 +110,7 @@ function syncLegacyFields(s, at = now()) {
 }
 
 /**
- * #1 FIX (finalize immediately when elapsed):
- * Flip a running room to finished as soon as its authoritative remaining time hits 0.
- * Key effect: prevents "overtime drift" from stealing seconds when user presses +30 after 0:00.
+ * Finalize immediately when elapsed
  */
 function finalizeIfElapsed(roomId, at = now()) {
   const room = rooms.get(roomId);
@@ -129,50 +129,110 @@ function finalizeIfElapsed(roomId, at = now()) {
   return false;
 }
 
-function makeSnapshotPayload(s) {
+function makeSnapshotPayload(s, serverNowMs) {
   return {
     ...s,
-
-    // FIXED thresholds (Option #1) — clients should key off these.
     yellowAtMs: FIXED_YELLOW_AT_MS,
     redAtMs: FIXED_RED_AT_MS,
-
-    // Always include server clock
-    serverNow: now(),
+    serverNow: serverNowMs,
   };
+}
+
+function buildSnapshotMessage(room) {
+  const serverNowMs = now();
+
+  // Always keep state consistent before snapshot
+  finalizeIfElapsed(room.state.roomId, serverNowMs);
+  syncLegacyFields(room.state, serverNowMs);
+
+  return JSON.stringify({
+    type: "snapshot",
+    payload: makeSnapshotPayload(room.state, serverNowMs),
+  });
 }
 
 function sendSnapshot(ws, roomId) {
   const room = rooms.get(roomId);
   if (!room) return;
 
-  finalizeIfElapsed(roomId);
-  syncLegacyFields(room.state);
-
-  ws.send(
-    JSON.stringify({
-      type: "snapshot",
-      payload: makeSnapshotPayload(room.state),
-    })
-  );
+  const msg = buildSnapshotMessage(room);
+  try {
+    ws.send(msg);
+  } catch {}
 }
 
 function broadcast(roomId) {
   const room = rooms.get(roomId);
   if (!room) return;
 
-  finalizeIfElapsed(roomId);
-  syncLegacyFields(room.state);
-
-  const msg = JSON.stringify({
-    type: "snapshot",
-    payload: makeSnapshotPayload(room.state),
-  });
+  const msg = buildSnapshotMessage(room);
 
   room.clients.forEach((ws) => {
-    if (ws.readyState === ws.OPEN) ws.send(msg);
+    if (ws.readyState === WS_OPEN) {
+      try {
+        ws.send(msg);
+      } catch {}
+    }
   });
 }
+
+/**
+ * High-frequency "authoritative heartbeat" snapshots
+ * This is what removes the perceived lag between control and display.
+ *
+ * - We broadcast frequently ONLY when there are clients and the room is active-ish.
+ * - Also covers cases where control page does local UI updates; the display stays tightly synced.
+ */
+const SNAPSHOT_TICK_MS = 100;
+
+setInterval(() => {
+  const t = now();
+
+  for (const [roomId, room] of rooms.entries()) {
+    if (!room || room.clients.size === 0) continue;
+
+    const s = room.state;
+    const active =
+      s.status === "running" || s.status === "paused" || s.status === "finished";
+
+    if (!active) continue;
+
+    // finalize if needed (only matters when running)
+    const changed = finalizeIfElapsed(roomId, t);
+
+    // Build once per tick per room (cache by time bucket)
+    // Note: we still include a fresh serverNow each tick.
+    const msg = (() => {
+      // Avoid rebuilding within same tick timestamp
+      if (room._lastMsg && room._lastMsgAt === t) return room._lastMsg;
+      const m = JSON.stringify({
+        type: "snapshot",
+        payload: makeSnapshotPayload(
+          (() => {
+            syncLegacyFields(s, t);
+            return s;
+          })(),
+          t
+        ),
+      });
+      room._lastMsg = m;
+      room._lastMsgAt = t;
+      return m;
+    })();
+
+    room.clients.forEach((ws) => {
+      if (ws.readyState === WS_OPEN) {
+        try {
+          ws.send(msg);
+        } catch {}
+      }
+    });
+
+    // If we just transitioned to finished, keep broadcasting (clients will stop showing overtime anyway)
+    // (no special handling needed; active includes finished)
+    void changed;
+  }
+}, SNAPSHOT_TICK_MS);
 
 function detachFromRoom(ws) {
   const prevRoomId = ws._roomId;
@@ -202,7 +262,7 @@ wss.on("connection", (ws, req) => {
   ws._role = initialRole;
   attachToRoom(ws, initialRoomId);
 
-  // Send initial snapshot
+  // Send initial snapshot immediately
   sendSnapshot(ws, ws._roomId);
 
   ws.on("message", (data) => {
@@ -258,8 +318,7 @@ wss.on("connection", (ws, req) => {
 
     if (mutating && role !== "control") return;
 
-    // IMPORTANT: finalize BEFORE applying any new command.
-    // Prevents overtime drift from affecting later operations like +30s.
+    // Finalize BEFORE applying any new command.
     const n = now();
     finalizeIfElapsed(roomId, n);
 
@@ -267,10 +326,7 @@ wss.on("connection", (ws, req) => {
 
     switch (type) {
       case "start": {
-        const durationMs = Math.max(
-          1000,
-          Number(payload?.durationMs ?? s.durationMs)
-        );
+        const durationMs = Math.max(1000, Number(payload?.durationMs ?? s.durationMs));
         s.status = "running";
         s.durationMs = durationMs;
         s.remainingMs = durationMs;
@@ -312,10 +368,7 @@ wss.on("connection", (ws, req) => {
 
       case "setDuration": {
         // preserve elapsed time when changing duration while running
-        const newDur = Math.max(
-          1000,
-          Number(payload?.durationMs ?? s.durationMs)
-        );
+        const newDur = Math.max(1000, Number(payload?.durationMs ?? s.durationMs));
 
         const oldDur = Math.max(1000, Number(s.durationMs) || 180_000);
         const currentRem = remainingFromAuthoritative(s, n);
@@ -328,7 +381,6 @@ wss.on("connection", (ws, req) => {
           s.remainingMs = newRem;
           s.deadlineMs = n + newRem;
         } else {
-          // If shrinking duration, clamp remaining to new duration
           const clampedRem = Math.min(currentRem, newDur);
           s.remainingMs = clampNonNeg(clampedRem);
           s.deadlineMs = null;
@@ -339,12 +391,9 @@ wss.on("connection", (ws, req) => {
         break;
       }
 
-      // allow remainingMs to exceed durationMs by expanding duration
       case "adjustTime": {
         const delta = Number(payload?.deltaMs ?? 0);
 
-        // If we were running but already elapsed, finalizeIfElapsed() above flipped to finished,
-        // so we naturally take the non-running branch and add from 0 (no drift).
         if (s.status === "running" && typeof s.deadlineMs === "number") {
           const minDeadline = n + 1000;
           s.deadlineMs = Math.max(minDeadline, s.deadlineMs + delta);
@@ -369,8 +418,7 @@ wss.on("connection", (ws, req) => {
 
       case "setThresholds": {
         // Option #1: thresholds are FIXED server-side (1:00 / 0:30).
-        // Keep the message type for backwards-compat, but do not change behavior.
-        // Still store payload if you want, but it won't affect snapshots/colors.
+        // Keep message type for backwards-compat; store payload but don't change behavior.
         if (payload && typeof payload === "object") {
           const yf = Number(payload?.yellowFrac);
           const rf = Number(payload?.redFrac);
@@ -395,15 +443,16 @@ wss.on("connection", (ws, req) => {
       }
 
       case "requestSnapshot": {
-        // no-op; we'll just broadcast below
-        break;
+        // send the requester an immediate snapshot (useful if a client wants it)
+        sendSnapshot(ws, roomId);
+        return;
       }
 
       default:
         return;
     }
 
-    // One more finalize pass (covers edge cases like start with tiny duration)
+    // Edge safety: finalize + broadcast now (immediate, not waiting for tick)
     finalizeIfElapsed(roomId);
     broadcast(roomId);
   });
@@ -412,22 +461,6 @@ wss.on("connection", (ws, req) => {
     detachFromRoom(ws);
   });
 });
-
-// ---- Auto-finalize ticker (so rooms flip to "finished" even if nobody clicks anything) ----
-const FINALIZE_TICK_MS = 250;
-
-setInterval(() => {
-  const t = now();
-  for (const [roomId, room] of rooms.entries()) {
-    const s = room.state;
-    if (s.status === "running" && typeof s.deadlineMs === "number") {
-      if (finalizeIfElapsed(roomId, t)) {
-        // only broadcast when we actually transition to finished
-        broadcast(roomId);
-      }
-    }
-  }
-}, FINALIZE_TICK_MS);
 
 // ---- Cleanup inactive rooms ----
 // Rooms are kept for 4 hours after last update if no clients are connected.
