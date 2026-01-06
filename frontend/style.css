@@ -114,7 +114,33 @@
     0 0 2.8rem rgba(239, 68, 68, .24);
 }
 
-/* Reduced motion: obvious brightness pulse (no scale), still long enough to notice */
+/* ===== Continuous 0:00 flashing (digits only) =====
+   display.js should add/remove `.st-expired` on #count when remaining hits 0.
+   This overrides the one-shot heartbeat while expired.
+*/
+@keyframes st-expired-flash {
+  0%   { opacity: 1;   transform: scale(1);      filter: brightness(1.00); }
+  18%  { opacity: .55; transform: scale(1.010);  filter: brightness(1.45); }
+  36%  { opacity: 1;   transform: scale(1);      filter: brightness(1.05); }
+  54%  { opacity: .62; transform: scale(1.008);  filter: brightness(1.35); }
+  72%  { opacity: 1;   transform: scale(1);      filter: brightness(1.02); }
+  100% { opacity: 1;   transform: scale(1);      filter: brightness(1.00); }
+}
+
+/* Put this AFTER .st-heartbeat so it wins when both are present */
+.count.st-expired{
+  animation: st-expired-flash 1050ms cubic-bezier(.2,.9,.2,1) infinite;
+  will-change: opacity, transform, filter;
+  transform-origin: center;
+}
+
+/* Make expired flash look “alive” in red without a fullscreen overlay */
+.count.st-expired.phase-red{
+  text-shadow:
+    0 0 1.35rem rgba(239, 68, 68, .70),
+    0 0 3.1rem rgba(239, 68, 68, .28);
+}
+
 @media (prefers-reduced-motion: reduce){
   @keyframes st-count-heartbeat {
     0%   { opacity: 1;   filter: brightness(1); }
@@ -129,6 +155,16 @@
   .count.st-heartbeat{
     animation-duration: 1100ms;
     animation-iteration-count: 1;
+  }
+
+  @keyframes st-expired-flash {
+    0%   { opacity: 1;   filter: brightness(1); }
+    30%  { opacity: .68; filter: brightness(1.20); }
+    60%  { opacity: 1;   filter: brightness(1.05); }
+    100% { opacity: 1;   filter: brightness(1); }
+  }
+  .count.st-expired{
+    animation-duration: 1300ms;
   }
 }
 

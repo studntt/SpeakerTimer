@@ -1,4 +1,4 @@
-// display.js (authoritative-deadline client; fixed thresholds; digit-only subtle heartbeat flash; end alarm w/ reset-stop + fullscreen-safe overlay + 2.5s alarm limit)
+// display.js (authoritative-deadline client; fixed thresholds; digit-only subtle heartbeat flash; expired loop flash; end alarm w/ reset-stop + fullscreen-safe overlay + 2.5s alarm limit)
 
 const qs = new URLSearchParams(location.search);
 
@@ -26,6 +26,9 @@ let state = {
 let syncedBaseRemainingMs = state.remainingMs;
 let syncedReceivedAt = performance.now();
 let lastPhase = null;
+
+// NEW: track transition into/out of expired loop
+let wasExpired = false;
 
 /**
  * Socket/reconnect guard:
@@ -63,6 +66,9 @@ const flash = {
 
   trigger() {
     if (!els.count) return;
+
+    // NEW: do not heartbeat while expired loop is active
+    if (els.count.classList.contains("st-expired")) return;
 
     // clear any pending cleanup so rapid re-triggers don't fight each other
     if (this._killTimer) {
@@ -215,6 +221,7 @@ function applyPhase(phase) {
   if (phase === lastPhase) return;
 
   // Digit flash logic on phase entry (no overlay)
+  // NEW: heartbeat suppressed while st-expired is active (handled inside flash.trigger)
   if (phase === "green") {
     // allow re-flash if time is adjusted back above thresholds
     flash.resetFlags();
@@ -248,6 +255,11 @@ function resetVisualAndAlarm() {
   alarm.stop();
   alarm.reset();
   expiredShown = false;
+
+  // NEW: reset expired loop state
+  wasExpired = false;
+  if (els.count) els.count.classList.remove("st-expired");
+
   if (els.expiredMsg) els.expiredMsg.hidden = true;
 }
 
@@ -260,6 +272,23 @@ function tick() {
   const showExpired =
     rem === 0 &&
     (state.status === "running" || state.status === "paused" || state.status === "finished");
+
+  // NEW: expired loop flash (digit-only) — edge-triggered, no stacking
+  if (els.count) {
+    if (showExpired && !wasExpired) {
+      wasExpired = true;
+      els.count.classList.add("st-expired");
+      // ensure heartbeat isn't left stuck
+      els.count.classList.remove("st-heartbeat");
+    } else if (!showExpired && wasExpired) {
+      wasExpired = false;
+      els.count.classList.remove("st-expired");
+      // allow phase heartbeat to work again when time comes back
+      flash.resetFlags();
+    }
+  } else {
+    wasExpired = false;
+  }
 
   // ✅ Play sound each time the expired message APPEARS (once per show cycle)
   if (showExpired && !expiredShown) {
