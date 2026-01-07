@@ -1,4 +1,5 @@
-// display.js (authoritative-deadline client; fixed thresholds; digit-only subtle heartbeat flash; expired loop flash; end alarm w/ reset-stop + fullscreen-safe overlay + 2.5s alarm limit)
+// display.js (authoritative-deadline client; fixed thresholds; digit-only flash bloom;
+// 0:00 uses SAME one-shot bloom; end alarm w/ reset-stop + fullscreen-safe overlay + 2.5s alarm limit)
 
 const qs = new URLSearchParams(location.search);
 
@@ -27,7 +28,7 @@ let syncedBaseRemainingMs = state.remainingMs;
 let syncedReceivedAt = performance.now();
 let lastPhase = null;
 
-// NEW: track transition into/out of expired loop
+// Track transition into/out of expired state (edge-trigger)
 let wasExpired = false;
 
 /**
@@ -40,6 +41,13 @@ let reconnectRoom = null;
 
 // Track expired banner visibility so alarm plays ONCE per "show" cycle
 let expiredShown = false;
+
+// Render guards (avoid DOM writes every frame)
+let lastRenderedSec = null;
+let lastRenderedExpired = null;
+
+// CSS flash durations are now ~1400ms (phase) and ~1900ms (expired). Give it a buffer.
+const HEARTBEAT_KILL_MS = 2200;
 
 // ---------- Typing guard ----------
 function isTypingContext(e) {
@@ -58,7 +66,7 @@ function isTypingContext(e) {
   return false;
 }
 
-// ---------- Digit-only subtle heartbeat (one-shot on phase entry) ----------
+// ---------- Digit-only flash (one-shot on phase entry) ----------
 const flash = {
   didYellow: false,
   didRed: false,
@@ -67,7 +75,7 @@ const flash = {
   trigger() {
     if (!els.count) return;
 
-    // NEW: do not heartbeat while expired loop is active
+    // don't flash if the 0:00 pulse is currently being applied
     if (els.count.classList.contains("st-expired")) return;
 
     // clear any pending cleanup so rapid re-triggers don't fight each other
@@ -82,18 +90,16 @@ const flash = {
     void els.count.offsetWidth;
     els.count.classList.add("st-heartbeat");
 
-    // auto-clean so future triggers are clean even if animationend doesn't fire
     const cleanup = () => {
       if (!els.count) return;
       els.count.classList.remove("st-heartbeat");
     };
 
-    // Use once listener, but also a hard fallback for tab switches / dropped events
     els.count.addEventListener("animationend", cleanup, { once: true });
     this._killTimer = setTimeout(() => {
       this._killTimer = null;
       cleanup();
-    }, 1500);
+    }, HEARTBEAT_KILL_MS);
   },
 
   resetFlags() {
@@ -104,6 +110,47 @@ const flash = {
       this._killTimer = null;
     }
     if (els.count) els.count.classList.remove("st-heartbeat");
+  },
+};
+
+// ---------- 0:00 pulse (same one-shot animation, not infinite) ----------
+const expiredPulse = {
+  _killTimer: null,
+
+  trigger() {
+    if (!els.count) return;
+
+    if (this._killTimer) {
+      clearTimeout(this._killTimer);
+      this._killTimer = null;
+    }
+
+    // ensure we don't stack animations
+    els.count.classList.remove("st-heartbeat");
+    els.count.classList.remove("st-expired");
+    // eslint-disable-next-line no-unused-expressions
+    void els.count.offsetWidth;
+    els.count.classList.add("st-expired");
+
+    const cleanup = () => {
+      if (!els.count) return;
+      els.count.classList.remove("st-expired");
+    };
+
+    // Let it play once, then settle (still red via phase-red)
+    els.count.addEventListener("animationend", cleanup, { once: true });
+    this._killTimer = setTimeout(() => {
+      this._killTimer = null;
+      cleanup();
+    }, HEARTBEAT_KILL_MS);
+  },
+
+  reset() {
+    if (this._killTimer) {
+      clearTimeout(this._killTimer);
+      this._killTimer = null;
+    }
+    if (els.count) els.count.classList.remove("st-expired");
   },
 };
 
@@ -220,8 +267,7 @@ function applyPhase(phase) {
   if (!els.count) return;
   if (phase === lastPhase) return;
 
-  // Digit flash logic on phase entry (no overlay)
-  // NEW: heartbeat suppressed while st-expired is active (handled inside flash.trigger)
+  // Flash logic on phase entry (no overlay)
   if (phase === "green") {
     // allow re-flash if time is adjusted back above thresholds
     flash.resetFlags();
@@ -252,13 +298,17 @@ function renderSubline() {
 
 function resetVisualAndAlarm() {
   flash.resetFlags();
+  expiredPulse.reset();
+
   alarm.stop();
   alarm.reset();
   expiredShown = false;
 
-  // NEW: reset expired loop state
   wasExpired = false;
-  if (els.count) els.count.classList.remove("st-expired");
+
+  // reset render guards so the UI snaps cleanly on next tick
+  lastRenderedSec = null;
+  lastRenderedExpired = null;
 
   if (els.expiredMsg) els.expiredMsg.hidden = true;
 }
@@ -270,24 +320,26 @@ function tick() {
   if (state.status === "running" && rem > 0) alarm.hadPositive = true;
 
   const showExpired =
-    rem === 0 &&
+    rem <= 0 &&
     (state.status === "running" || state.status === "paused" || state.status === "finished");
 
-  // NEW: expired loop flash (digit-only) — edge-triggered, no stacking
-  if (els.count) {
-    if (showExpired && !wasExpired) {
-      wasExpired = true;
-      els.count.classList.add("st-expired");
-      // ensure heartbeat isn't left stuck
-      els.count.classList.remove("st-heartbeat");
-    } else if (!showExpired && wasExpired) {
-      wasExpired = false;
-      els.count.classList.remove("st-expired");
-      // allow phase heartbeat to work again when time comes back
-      flash.resetFlags();
-    }
-  } else {
+  // 0:00 one-shot pulse (edge-triggered)
+  if (showExpired && !wasExpired) {
+    wasExpired = true;
+
+    // pulse digits once at 0:00
+    expiredPulse.trigger();
+
+    // ensure we don't leave any phase flash stuck
+    if (els.count) els.count.classList.remove("st-heartbeat");
+  } else if (!showExpired && wasExpired) {
     wasExpired = false;
+
+    // just in case it's still present for any reason
+    expiredPulse.reset();
+
+    // allow phase flash to work again when time comes back
+    flash.resetFlags();
   }
 
   // ✅ Play sound each time the expired message APPEARS (once per show cycle)
@@ -299,13 +351,21 @@ function tick() {
     expiredShown = false;
   }
 
-  if (els.expiredMsg) {
+  // Render expired banner ONLY on change (avoid repaint spam)
+  if (els.expiredMsg && showExpired !== lastRenderedExpired) {
+    lastRenderedExpired = showExpired;
     els.expiredMsg.textContent = showExpired ? "Your time has expired!!!" : "";
     els.expiredMsg.hidden = !showExpired;
   }
 
   applyPhase(computePhase(rem));
-  if (els.count) els.count.textContent = fmt(Math.floor(rem / 1000) * 1000);
+
+  // Render timer text ONLY when the displayed second changes (premium + crisp)
+  const sec = Math.max(0, Math.floor(rem / 1000));
+  if (els.count && sec !== lastRenderedSec) {
+    lastRenderedSec = sec;
+    els.count.textContent = fmt(sec * 1000);
+  }
 
   requestAnimationFrame(tick);
 }
@@ -491,6 +551,8 @@ function bindDom() {
 
   applyPhase("green");
   if (els.count) els.count.textContent = fmt(state.durationMs);
+  lastRenderedSec = Math.floor(state.durationMs / 1000);
+
   syncedBaseRemainingMs = state.durationMs;
   syncedReceivedAt = performance.now();
 

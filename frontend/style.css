@@ -49,7 +49,8 @@
   font-variant-numeric: tabular-nums;
   font-feature-settings: "tnum" 1, "ss01" 1, "cv10" 1; /* subtle Inter polish */
 
-  transition: text-shadow .2s ease, color .2s ease, opacity .2s ease, transform .2s ease, filter .2s ease;
+  /* Premium rule: don't transition the same props you animate (keeps glyphs crisp) */
+  transition: text-shadow .18s ease, color .18s ease;
 }
 
 .subline{
@@ -74,98 +75,125 @@
   animation: none;
 }
 
-/* ===== Digit-only heartbeat (LEVEL 2 — noticeably stronger, STILL projector-safe) =====
-   Dragged out longer (Option A): same punch, more time to notice.
-*/
+/* ============================================================
+   PREMIUM FLASH SETUP (BEST SETUP)
+   - Phase entry: “camera flash” glow bloom (no opacity dip, no scale)
+   - 0:00: stronger “alarm flare” glow bloom (one-shot)
+   - NOW: 3-beat rhythmic pulse: beep ... beep ... beep
+   - UPDATED: slower timing (less rapid)
+   - No filter: brightness() (prevents smeary glyph rendering)
+   ============================================================ */
 
-/* Two-beat, higher contrast, with “holds” so it doesn’t blink-and-you-miss-it */
-@keyframes st-count-heartbeat {
-  0%   { opacity: 1;   transform: scale(1);      filter: brightness(1); }
+/* ---- Phase entry: Camera flash (3-beat, SLOWER) ---- */
+@keyframes st-count-flash {
+  0%   { text-shadow: none; }
 
   /* Beat 1 */
-  10%  { opacity: .62; transform: scale(1.028);  filter: brightness(1.32); }
-  20%  { opacity: .62; transform: scale(1.028);  filter: brightness(1.32); }
-  32%  { opacity: 1;   transform: scale(1);      filter: brightness(1); }
+  12%  { text-shadow: var(--st-flash-peak); }
+  20%  { text-shadow: none; }
 
   /* Beat 2 */
-  54%  { opacity: .70; transform: scale(1.020);  filter: brightness(1.22); }
-  66%  { opacity: .70; transform: scale(1.020);  filter: brightness(1.22); }
-  78%  { opacity: 1;   transform: scale(1);      filter: brightness(1); }
+  46%  { text-shadow: var(--st-flash-peak); }
+  54%  { text-shadow: none; }
 
-  100% { opacity: 1;   transform: scale(1);      filter: brightness(1); }
+  /* Beat 3 */
+  80%  { text-shadow: var(--st-flash-peak); }
+  88%  { text-shadow: none; }
+
+  100% { text-shadow: none; }
 }
 
-/* Flash class applied to #count */
+/* ---- 0:00: Alarm flare (3-beat, stronger, SLOWER) ---- */
+@keyframes st-count-flare {
+  0%   { text-shadow: none; }
+
+  /* Beat 1 */
+  10%  { text-shadow: var(--st-flare-peak); }
+  17%  { text-shadow: none; }
+
+  /* Beat 2 */
+  42%  { text-shadow: var(--st-flare-peak); }
+  49%  { text-shadow: none; }
+
+  /* Beat 3 */
+  74%  { text-shadow: var(--st-flare-peak); }
+  81%  { text-shadow: none; }
+
+  100% { text-shadow: none; }
+}
+
+/* Phase flash hook (display.js keeps using .st-heartbeat) */
 .count.st-heartbeat{
-  animation: st-count-heartbeat 1300ms cubic-bezier(.2,.9,.2,1) 1;
-  will-change: opacity, transform, filter;
+  /* No opacity / no scale = premium */
+  animation: st-count-flash 1400ms cubic-bezier(.22,.9,.22,1) 1;
+  will-change: text-shadow;
   transform-origin: center;
+  transition: none; /* avoid interpolation while animation runs */
 }
 
-/* Stronger glow during the beat (phase-keyed) */
+/* Phase-keyed glow peaks (camera flash) */
 .count.st-heartbeat.phase-yellow{
-  text-shadow:
-    0 0 1.1rem rgba(250, 204, 21, .55),
-    0 0 2.4rem rgba(250, 204, 21, .22);
+  --st-flash-peak:
+    0 0 .85rem rgba(250, 204, 21, .55),
+    0 0 2.2rem rgba(250, 204, 21, .22),
+    0 0 3.8rem rgba(250, 204, 21, .10);
 }
 .count.st-heartbeat.phase-red{
-  text-shadow:
-    0 0 1.25rem rgba(239, 68, 68, .60),
-    0 0 2.8rem rgba(239, 68, 68, .24);
+  --st-flash-peak:
+    0 0 .95rem rgba(239, 68, 68, .60),
+    0 0 2.5rem rgba(239, 68, 68, .24),
+    0 0 4.2rem rgba(239, 68, 68, .12);
 }
 
-/* ===== Continuous 0:00 flashing (digits only) =====
-   display.js should add/remove `.st-expired` on #count when remaining hits 0.
-   This overrides the one-shot heartbeat while expired.
-*/
-@keyframes st-expired-flash {
-  0%   { opacity: 1;   transform: scale(1);      filter: brightness(1.00); }
-  18%  { opacity: .55; transform: scale(1.010);  filter: brightness(1.45); }
-  36%  { opacity: 1;   transform: scale(1);      filter: brightness(1.05); }
-  54%  { opacity: .62; transform: scale(1.008);  filter: brightness(1.35); }
-  72%  { opacity: 1;   transform: scale(1);      filter: brightness(1.02); }
-  100% { opacity: 1;   transform: scale(1);      filter: brightness(1.00); }
-}
-
-/* Put this AFTER .st-heartbeat so it wins when both are present */
+/* 0:00 flare hook (display.js uses .st-expired) */
 .count.st-expired{
-  animation: st-expired-flash 1050ms cubic-bezier(.2,.9,.2,1) infinite;
-  will-change: opacity, transform, filter;
+  animation: st-count-flare 1900ms cubic-bezier(.18,.92,.22,1) 1;
+  will-change: text-shadow;
   transform-origin: center;
+  transition: none;
 }
 
-/* Make expired flash look “alive” in red without a fullscreen overlay */
+/* Keep expired flare consistent + stronger (phase-red is applied at 0:00) */
 .count.st-expired.phase-red{
-  text-shadow:
-    0 0 1.35rem rgba(239, 68, 68, .70),
-    0 0 3.1rem rgba(239, 68, 68, .28);
+  --st-flare-peak:
+    0 0 1.15rem rgba(239, 68, 68, .78),
+    0 0 3.2rem rgba(239, 68, 68, .34),
+    0 0 5.2rem rgba(239, 68, 68, .18);
 }
 
+/* Reduced motion: keep it ultra subtle (still 3-beat, slower transitions) */
 @media (prefers-reduced-motion: reduce){
-  @keyframes st-count-heartbeat {
-    0%   { opacity: 1;   filter: brightness(1); }
-    20%  { opacity: .72; filter: brightness(1.18); }
-    34%  { opacity: .72; filter: brightness(1.18); }
-    46%  { opacity: 1;   filter: brightness(1); }
+  @keyframes st-count-flash {
+    0%   { text-shadow: none; }
 
-    66%  { opacity: .78; filter: brightness(1.12); }
-    80%  { opacity: .78; filter: brightness(1.12); }
-    100% { opacity: 1;   filter: brightness(1); }
+    18%  { text-shadow: var(--st-flash-peak); }
+    28%  { text-shadow: none; }
+
+    52%  { text-shadow: var(--st-flash-peak); }
+    62%  { text-shadow: none; }
+
+    86%  { text-shadow: var(--st-flash-peak); }
+    96%  { text-shadow: none; }
+
+    100% { text-shadow: none; }
   }
-  .count.st-heartbeat{
-    animation-duration: 1100ms;
-    animation-iteration-count: 1;
+  @keyframes st-count-flare {
+    0%   { text-shadow: none; }
+
+    16%  { text-shadow: var(--st-flare-peak); }
+    26%  { text-shadow: none; }
+
+    50%  { text-shadow: var(--st-flare-peak); }
+    60%  { text-shadow: none; }
+
+    84%  { text-shadow: var(--st-flare-peak); }
+    94%  { text-shadow: none; }
+
+    100% { text-shadow: none; }
   }
 
-  @keyframes st-expired-flash {
-    0%   { opacity: 1;   filter: brightness(1); }
-    30%  { opacity: .68; filter: brightness(1.20); }
-    60%  { opacity: 1;   filter: brightness(1.05); }
-    100% { opacity: 1;   filter: brightness(1); }
-  }
-  .count.st-expired{
-    animation-duration: 1300ms;
-  }
+  .count.st-heartbeat{ animation-duration: 1400ms; }
+  .count.st-expired{ animation-duration: 1900ms; }
 }
 
 /* ===================== CONTROL (modern minimal) ===================== */
