@@ -46,8 +46,8 @@ let expiredShown = false;
 let lastRenderedSec = null;
 let lastRenderedExpired = null;
 
-// CSS flash durations are now ~1400ms (phase) and ~1900ms (expired). Give it a buffer.
-const HEARTBEAT_KILL_MS = 2200;
+// CSS flash durations: 2600ms (phase) and 3200ms (expired). Give it buffer.
+const HEARTBEAT_KILL_MS = 3800;
 
 // ---------- Typing guard ----------
 function isTypingContext(e) {

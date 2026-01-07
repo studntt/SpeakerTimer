@@ -15,6 +15,10 @@
 
   /* unified app font */
   --font-sans: "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+
+  /* neon flash colors (used ONLY during flash animations) */
+  --neon-yellow: #fff24a;
+  --neon-red: #ff2d2d;
 }
 
 /* ===================== DISPLAY (font matched to control) ===================== */
@@ -43,14 +47,16 @@
   line-height:1;
   text-align:center;
 
-  /* More “pro” */
-  letter-spacing: 0.01em;     /* was 0.02em */
-  font-weight: 700;           /* was 800 */
+  letter-spacing: 0.01em;
+  font-weight: 700;
   font-variant-numeric: tabular-nums;
-  font-feature-settings: "tnum" 1, "ss01" 1, "cv10" 1; /* subtle Inter polish */
+  font-feature-settings: "tnum" 1, "ss01" 1, "cv10" 1;
 
-  /* Premium rule: don't transition the same props you animate (keeps glyphs crisp) */
   transition: text-shadow .18s ease, color .18s ease;
+
+  /* defaults so animations never "lose" the phase color */
+  --st-base-color: currentColor;
+  --st-neon-color: currentColor;
 }
 
 .subline{
@@ -59,8 +65,19 @@
 }
 
 .phase-green{ color: var(--fg); text-shadow: none; }
-.phase-yellow{ color: var(--yellow); text-shadow: 0 0 .5rem rgba(250, 204, 21, .25); }
-.phase-red{ color: var(--red); text-shadow: 0 0 .6rem rgba(239, 68, 68, .35); }
+
+.phase-yellow{
+  color: var(--yellow);
+  text-shadow: 0 0 .5rem rgba(250, 204, 21, .25);
+  --st-base-color: var(--yellow);
+  --st-neon-color: var(--neon-yellow);
+}
+.phase-red{
+  color: var(--red);
+  text-shadow: 0 0 .6rem rgba(239, 68, 68, .35);
+  --st-base-color: var(--red);
+  --st-neon-color: var(--neon-red);
+}
 
 .overtime::before{ content:"+"; margin-right:.1em; }
 
@@ -76,124 +93,143 @@
 }
 
 /* ============================================================
-   PREMIUM FLASH SETUP (BEST SETUP)
-   - Phase entry: “camera flash” glow bloom (no opacity dip, no scale)
-   - 0:00: stronger “alarm flare” glow bloom (one-shot)
-   - NOW: 3-beat rhythmic pulse: beep ... beep ... beep
-   - UPDATED: slower timing (less rapid)
-   - No filter: brightness() (prevents smeary glyph rendering)
+   FLASH SETUP (UPDATED)
+   - Only ONE-SHOT triggers (display.js)
+   - Double pulse stays front-loaded
+   - NEW: vanish → flash → vanish → flash (digits disappear before EACH flash)
    ============================================================ */
 
-/* ---- Phase entry: Camera flash (3-beat, SLOWER) ---- */
+/* ---- Phase entry: Two front-loaded flashes + vanish/snap TWICE ---- */
 @keyframes st-count-flash {
-  0%   { text-shadow: none; }
+  /* Vanish #1 */
+  0%   { text-shadow: none; color: var(--st-base-color); opacity: 0; }
+  14%  { text-shadow: none; color: var(--st-base-color); opacity: 0; }
 
-  /* Beat 1 */
-  12%  { text-shadow: var(--st-flash-peak); }
-  20%  { text-shadow: none; }
+  /* Flash #1 (snap back ON the flash) */
+  18%  { text-shadow: var(--st-flash-peak); color: var(--st-neon-color); opacity: 1; }
+  24%  { text-shadow: var(--st-flash-peak); color: var(--st-neon-color); opacity: 1; }
 
-  /* Beat 2 */
-  46%  { text-shadow: var(--st-flash-peak); }
-  54%  { text-shadow: none; }
+  /* Return to base briefly */
+  26%  { text-shadow: none; color: var(--st-base-color); opacity: 1; }
 
-  /* Beat 3 */
-  80%  { text-shadow: var(--st-flash-peak); }
-  88%  { text-shadow: none; }
+  /* Vanish #2 */
+  30%  { text-shadow: none; color: var(--st-base-color); opacity: 0; }
+  36%  { text-shadow: none; color: var(--st-base-color); opacity: 0; }
 
-  100% { text-shadow: none; }
+  /* Flash #2 (snap back ON the flash) */
+  40%  { text-shadow: var(--st-flash-peak); color: var(--st-neon-color); opacity: 1; }
+  46%  { text-shadow: var(--st-flash-peak); color: var(--st-neon-color); opacity: 1; }
+
+  /* Settle */
+  52%  { text-shadow: none; color: var(--st-base-color); opacity: 1; }
+  100% { text-shadow: none; color: var(--st-base-color); opacity: 1; }
 }
 
-/* ---- 0:00: Alarm flare (3-beat, stronger, SLOWER) ---- */
+/* ---- 0:00: Two front-loaded flares + vanish/snap TWICE ---- */
 @keyframes st-count-flare {
-  0%   { text-shadow: none; }
+  /* Vanish #1 */
+  0%   { text-shadow: none; color: var(--st-base-color); opacity: 0; }
+  12%  { text-shadow: none; color: var(--st-base-color); opacity: 0; }
 
-  /* Beat 1 */
-  10%  { text-shadow: var(--st-flare-peak); }
-  17%  { text-shadow: none; }
+  /* Flare #1 (snap back ON the flare) */
+  16%  { text-shadow: var(--st-flare-peak); color: var(--st-neon-color); opacity: 1; }
+  24%  { text-shadow: var(--st-flare-peak); color: var(--st-neon-color); opacity: 1; }
 
-  /* Beat 2 */
-  42%  { text-shadow: var(--st-flare-peak); }
-  49%  { text-shadow: none; }
+  /* Return to base briefly */
+  26%  { text-shadow: none; color: var(--st-base-color); opacity: 1; }
 
-  /* Beat 3 */
-  74%  { text-shadow: var(--st-flare-peak); }
-  81%  { text-shadow: none; }
+  /* Vanish #2 */
+  30%  { text-shadow: none; color: var(--st-base-color); opacity: 0; }
+  36%  { text-shadow: none; color: var(--st-base-color); opacity: 0; }
 
-  100% { text-shadow: none; }
+  /* Flare #2 (snap back ON the flare) */
+  40%  { text-shadow: var(--st-flare-peak); color: var(--st-neon-color); opacity: 1; }
+  48%  { text-shadow: var(--st-flare-peak); color: var(--st-neon-color); opacity: 1; }
+
+  /* Settle */
+  56%  { text-shadow: none; color: var(--st-base-color); opacity: 1; }
+  100% { text-shadow: none; color: var(--st-base-color); opacity: 1; }
 }
 
-/* Phase flash hook (display.js keeps using .st-heartbeat) */
+/* Phase flash hook */
 .count.st-heartbeat{
-  /* No opacity / no scale = premium */
-  animation: st-count-flash 1400ms cubic-bezier(.22,.9,.22,1) 1;
-  will-change: text-shadow;
-  transform-origin: center;
-  transition: none; /* avoid interpolation while animation runs */
-}
-
-/* Phase-keyed glow peaks (camera flash) */
-.count.st-heartbeat.phase-yellow{
-  --st-flash-peak:
-    0 0 .85rem rgba(250, 204, 21, .55),
-    0 0 2.2rem rgba(250, 204, 21, .22),
-    0 0 3.8rem rgba(250, 204, 21, .10);
-}
-.count.st-heartbeat.phase-red{
-  --st-flash-peak:
-    0 0 .95rem rgba(239, 68, 68, .60),
-    0 0 2.5rem rgba(239, 68, 68, .24),
-    0 0 4.2rem rgba(239, 68, 68, .12);
-}
-
-/* 0:00 flare hook (display.js uses .st-expired) */
-.count.st-expired{
-  animation: st-count-flare 1900ms cubic-bezier(.18,.92,.22,1) 1;
-  will-change: text-shadow;
+  animation: st-count-flash 2600ms cubic-bezier(.18,.92,.22,1) 1;
+  will-change: text-shadow, color, opacity;
   transform-origin: center;
   transition: none;
 }
 
-/* Keep expired flare consistent + stronger (phase-red is applied at 0:00) */
-.count.st-expired.phase-red{
-  --st-flare-peak:
-    0 0 1.15rem rgba(239, 68, 68, .78),
-    0 0 3.2rem rgba(239, 68, 68, .34),
-    0 0 5.2rem rgba(239, 68, 68, .18);
+/* Phase-keyed glow peaks */
+.count.st-heartbeat.phase-yellow{
+  --st-flash-peak:
+    0 0 1.25rem rgba(250, 204, 21, .78),
+    0 0 3.4rem rgba(250, 204, 21, .34),
+    0 0 5.4rem rgba(250, 204, 21, .18);
+}
+.count.st-heartbeat.phase-red{
+  --st-flash-peak:
+    0 0 1.35rem rgba(239, 68, 68, .82),
+    0 0 3.8rem rgba(239, 68, 68, .38),
+    0 0 6.0rem rgba(239, 68, 68, .20);
 }
 
-/* Reduced motion: keep it ultra subtle (still 3-beat, slower transitions) */
+/* 0:00 flare hook */
+.count.st-expired{
+  animation: st-count-flare 3200ms cubic-bezier(.16,.92,.22,1) 1;
+  will-change: text-shadow, color, opacity;
+  transform-origin: center;
+  transition: none;
+}
+
+.count.st-expired.phase-red{
+  --st-flare-peak:
+    0 0 1.35rem rgba(239, 68, 68, .82),
+    0 0 3.8rem rgba(239, 68, 68, .38),
+    0 0 6.0rem rgba(239, 68, 68, .20);
+}
+
+/* Reduced motion: keep it calm (still one-shot, still vanish→flash→vanish→flash) */
 @media (prefers-reduced-motion: reduce){
   @keyframes st-count-flash {
-    0%   { text-shadow: none; }
+    0%   { text-shadow: none; color: var(--st-base-color); opacity: 0; }
+    16%  { text-shadow: none; color: var(--st-base-color); opacity: 0; }
 
-    18%  { text-shadow: var(--st-flash-peak); }
-    28%  { text-shadow: none; }
+    20%  { text-shadow: var(--st-flash-peak); color: var(--st-neon-color); opacity: 1; }
+    26%  { text-shadow: var(--st-flash-peak); color: var(--st-neon-color); opacity: 1; }
 
-    52%  { text-shadow: var(--st-flash-peak); }
-    62%  { text-shadow: none; }
+    28%  { text-shadow: none; color: var(--st-base-color); opacity: 1; }
 
-    86%  { text-shadow: var(--st-flash-peak); }
-    96%  { text-shadow: none; }
+    32%  { text-shadow: none; color: var(--st-base-color); opacity: 0; }
+    38%  { text-shadow: none; color: var(--st-base-color); opacity: 0; }
 
-    100% { text-shadow: none; }
+    42%  { text-shadow: var(--st-flash-peak); color: var(--st-neon-color); opacity: 1; }
+    48%  { text-shadow: var(--st-flash-peak); color: var(--st-neon-color); opacity: 1; }
+
+    56%  { text-shadow: none; color: var(--st-base-color); opacity: 1; }
+    100% { text-shadow: none; color: var(--st-base-color); opacity: 1; }
   }
+
   @keyframes st-count-flare {
-    0%   { text-shadow: none; }
+    0%   { text-shadow: none; color: var(--st-base-color); opacity: 0; }
+    14%  { text-shadow: none; color: var(--st-base-color); opacity: 0; }
 
-    16%  { text-shadow: var(--st-flare-peak); }
-    26%  { text-shadow: none; }
+    18%  { text-shadow: var(--st-flare-peak); color: var(--st-neon-color); opacity: 1; }
+    26%  { text-shadow: var(--st-flare-peak); color: var(--st-neon-color); opacity: 1; }
 
-    50%  { text-shadow: var(--st-flare-peak); }
-    60%  { text-shadow: none; }
+    28%  { text-shadow: none; color: var(--st-base-color); opacity: 1; }
 
-    84%  { text-shadow: var(--st-flare-peak); }
-    94%  { text-shadow: none; }
+    32%  { text-shadow: none; color: var(--st-base-color); opacity: 0; }
+    40%  { text-shadow: none; color: var(--st-base-color); opacity: 0; }
 
-    100% { text-shadow: none; }
+    44%  { text-shadow: var(--st-flare-peak); color: var(--st-neon-color); opacity: 1; }
+    52%  { text-shadow: var(--st-flare-peak); color: var(--st-neon-color); opacity: 1; }
+
+    60%  { text-shadow: none; color: var(--st-base-color); opacity: 1; }
+    100% { text-shadow: none; color: var(--st-base-color); opacity: 1; }
   }
 
-  .count.st-heartbeat{ animation-duration: 1400ms; }
-  .count.st-expired{ animation-duration: 1900ms; }
+  .count.st-heartbeat{ animation-duration: 2600ms; }
+  .count.st-expired{ animation-duration: 3200ms; }
 }
 
 /* ===================== CONTROL (modern minimal) ===================== */
@@ -265,7 +301,7 @@ h1 {
 
 /* Utility */
 .visually-hidden{
-  position:absolute; width:1px; height:1px; padding:0; margin:-1px; overflow:hidden; clip:rect(0,0,0,0); white-space:nowrap; border:0;
+  position:absolute; width:1px; height:1px; padding:0; margin:0; overflow:hidden; clip:rect(0,0,0,0); white-space:nowrap; border:0;
 }
 
 /* Rows */
@@ -343,8 +379,8 @@ button.primary:hover{ background:#29d66c; border-color:#29d66c; }
 /* Timer preview */
 .time-big {
   font-size: clamp(3.2rem, 9vw, 6.2rem);
-  font-weight: 700;           /* was 800 */
-  letter-spacing: 0.01em;     /* match display */
+  font-weight: 700;
+  letter-spacing: 0.01em;
   text-align: center;
   color: #fafafa;
   margin: .6rem 0;
@@ -352,7 +388,6 @@ button.primary:hover{ background:#29d66c; border-color:#29d66c; }
   font-feature-settings: "tnum" 1, "ss01" 1, "cv10" 1;
 }
 
-/* Make control preview obey phase colors (override .time-big color) */
 .time-big.phase-green{
   color: var(--fg);
   text-shadow: none;
@@ -368,7 +403,7 @@ button.primary:hover{ background:#29d66c; border-color:#29d66c; }
 
 /* Progress track removed visually */
 .timer-card .progress{ display:none !important; }
-.timer-card .phase{ display:none; } /* reserved hook */
+.timer-card .phase{ display:none; }
 
 /* ===== Controls (single horizontal row) ===== */
 .controls{
@@ -426,7 +461,6 @@ button.primary:hover{ background:#29d66c; border-color:#29d66c; }
 }
 .help-line:hover .help-link{ opacity:1; text-decoration:underline; text-decoration-color:#3b82f6; }
 
-/* Make anchor styled like buttons keep spacing parity */
 a.button{ display:inline-flex; align-items:center; }
 
 /* ===== Custom button colors ===== */
@@ -462,7 +496,6 @@ a.button{ display:inline-flex; align-items:center; }
 }
 .btn-light-green:hover{ filter: brightness(1.05); }
 
-/* Focus ring for colored buttons */
 .btn-dark-green:focus,
 .btn-yellow:focus,
 .btn-red:focus,
@@ -473,7 +506,6 @@ a.button{ display:inline-flex; align-items:center; }
 
 /* ===== Dropdown panel behavior ===== */
 .dropdown-panel{
-  /* hidden by default; JS toggles is-open/is-closed */
   will-change: transform, opacity, height;
   transition:
     opacity .22s ease,
@@ -483,8 +515,6 @@ a.button{ display:inline-flex; align-items:center; }
     padding .22s ease;
   overflow: hidden;
 }
-
-/* Closed state */
 .dropdown-panel.is-closed{
   opacity: 0;
   transform: translateY(-8px);
@@ -495,17 +525,13 @@ a.button{ display:inline-flex; align-items:center; }
   pointer-events: none;
   visibility: hidden;
 }
-
-/* Open state */
 .dropdown-panel.is-open{
   opacity: 1;
   transform: translateY(0);
-  height: auto; /* content height */
+  height: auto;
   pointer-events: auto;
   visibility: visible;
 }
-
-/* Ensure inner spacing looks nice when panel opens */
 .dropdown-panel .row:first-child{ margin-top:.25rem; }
 
 /* ===== Modal (dark, rounded, inner scroll) ===== */
@@ -546,16 +572,11 @@ a.button{ display:inline-flex; align-items:center; }
   display:flex; justify-content:flex-end; gap:8px;
   position:sticky; bottom:0; background:#101114;
 }
-
-/* Documentation table inside modal */
 .doc-table{ width:100%; border-collapse:collapse; margin:8px 0 16px; }
 .doc-table th, .doc-table td{ border:1px solid #2a2c33; padding:8px 10px; text-align:left; }
 .doc-tip{ color:#cbd5e1; }
-
-/* Prevent background scroll when modal is open */
 .no-scroll{ overflow:hidden; }
 
-/* Responsive */
 @media (max-width: 540px){
   .control-wrap{ padding:1.25rem 1rem 2rem; }
   .row{ gap:.45rem; }
